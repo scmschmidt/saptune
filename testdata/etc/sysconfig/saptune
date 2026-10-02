@@ -42,3 +42,4 @@ SAPTUNE_VERSION="3"
 # 'yellow-noncmpl'
 # Refer to the man page for a desciprion of the color schemes.
 COLOR_SCHEME="full-green-zebra"
+

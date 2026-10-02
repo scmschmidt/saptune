@@ -209,13 +209,6 @@ func loadComplaints(file string) map[string][]string {
 	return res
 }
 
-var reportedMissingDropIns = make(map[string]bool)
-
-// ResetReportedMissingDropIns resets the de-duplication cache of reported missing drop-in errors
-func ResetReportedMissingDropIns() {
-	reportedMissingDropIns = make(map[string]bool)
-}
-
 // GetSystemdConfVal reads the actual value from the drop-in file and checks for conflicts in other drop-ins.
 func GetSystemdConfVal(section, key, noteID string) (string, string, error) {
 	_, dropInFile, stateFile := GetSystemdDropInPaths(section)
@@ -551,38 +544,22 @@ func renderDropInContent(blocks []SystemdNoteBlock) string {
 	return sb.String()
 }
 
-// GetNoteEffectiveSectionEntries parses the note file and override, returning whether the note was found on disk and its effective entries for section
+// GetNoteEffectiveSectionEntries parses the note file and override, returning whether the note was found on disk and its effective entries for a section
 func GetNoteEffectiveSectionEntries(section, noteID string) (bool, []txtparser.INIEntry) {
 	if noteID == "" {
 		return false, nil
 	}
 
-	var noteFile string
-	candidates := []string{
-		filepath.Join(ExtraTuningSheets, noteID+".conf"),
-		filepath.Join(NoteTuningSheets, noteID),
-		filepath.Join("/usr/share/saptune/notes", noteID),
-	}
-	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
-			noteFile = c
-			break
-		}
-	}
-	if noteFile == "" {
-		return false, nil
-	}
-
-	ini, err := txtparser.ParseINIFile(noteFile, false)
-	if err != nil || ini == nil {
-		return true, nil
+	parsed, err := getParsedNote(noteID)
+	if err != nil || parsed == nil {
+		return false, nil // Note file not found or failed to parse
 	}
 
 	// Check for overrides
 	override, ow := txtparser.GetOverrides("ovw", noteID)
 
 	var entries []txtparser.INIEntry
-	for _, entry := range ini.AllValues {
+	for _, entry := range parsed.AllValues {
 		if entry.Section == section {
 			if override && ow != nil && len(ow.KeyValue[section]) > 0 {
 				if owEntry, ok := ow.KeyValue[section][entry.Key]; ok {
@@ -601,6 +578,37 @@ func GetNoteEffectiveSectionEntries(section, noteID string) (bool, []txtparser.I
 		}
 	}
 	return true, entries
+}
+
+// getParsedNote is a helper that returns a cached or newly parsed INI file for a given note ID.
+func getParsedNote(noteID string) (*txtparser.INIFile, error) {
+	if cached, exists := parsedNoteCache[noteID]; exists {
+		return cached, nil
+	}
+
+	var noteFile string
+	candidates := []string{
+		filepath.Join(ExtraTuningSheets, noteID+".conf"),
+		filepath.Join(NoteTuningSheets, noteID),
+		filepath.Join("/usr/share/saptune/notes", noteID),
+	}
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			noteFile = c
+			break
+		}
+	}
+	if noteFile == "" {
+		return nil, fmt.Errorf("note file for ID %s not found", noteID)
+	}
+
+	parsed, err := txtparser.ParseINIFile(noteFile, false)
+	if err != nil {
+		return nil, err
+	}
+
+	parsedNoteCache[noteID] = parsed
+	return parsed, nil
 }
 
 // ApplySystemdConf creates, updates, or reverts drop-in entries for a given section and note.
@@ -669,7 +677,9 @@ func ApplySystemdConf(section, noteID string, entries []txtparser.INIEntry, reve
 	}
 
 	// Save updated state
-	_ = saveAppliedNotes(stateFile, appliedNotes)
+	if err := saveAppliedNotes(stateFile, appliedNotes); err != nil {
+		return false, fmt.Errorf("failed to save systemd state to %s: %w", stateFile, err)
+	}
 
 	// If no applied notes remain for this section, remove the drop-in file
 	if len(appliedNotes) == 0 {

@@ -97,7 +97,7 @@ func SelectAction(writer io.Writer, stApp *app.App, saptuneVers string) {
 	case "service":
 		ServiceAction(writer, system.CliArg(2), saptuneVers, stApp)
 	case "note":
-		NoteAction(writer, system.CliArg(2), system.CliArg(3), system.CliArg(4), stApp)
+		SelectNoteAction(writer, system.CliArg(2), system.CliArg(3), system.CliArg(4), stApp)
 	case "solution":
 		SolutionAction(writer, system.CliArg(2), system.CliArg(3), system.CliArg(4), stApp)
 	case "configure":

@@ -95,3 +95,6 @@
 ## Facts gathering service URL
 
 # facts-service-url: amqp://guest:guest@localhost:5672
+
+# modified by saptune
+saptune-discovery-period: 300s

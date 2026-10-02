@@ -423,7 +423,7 @@ func TestGetSystemdConfValAndConflicts(t *testing.T) {
 	}
 
 	// Case 2b: Drop-in was generated at apply for Note 123456, but is now missing on verify
-	ResetReportedMissingDropIns()
+	ResetCaches()
 	_ = os.Remove(SystemdSystemDropInFile)
 	val, inform, err = GetSystemdConfVal(txtparser.INISectionSystemdSystem, "DefaultTimeoutStartSec (system.conf)", "123456")
 	if err != nil {
