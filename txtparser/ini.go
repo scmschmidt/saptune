@@ -77,6 +77,13 @@ func GetINIFileDescriptiveName(fileName string) string {
 	return rval
 }
 
+// isSystemdConfSection checks if a section name corresponds to a systemd configuration section
+func isSystemdConfSection(sec string) bool {
+	s := strings.ToLower(strings.TrimSpace(sec))
+	return s == INISectionSystemdSystem || s == INISectionSystemdUser ||
+		strings.HasPrefix(s, "systemd-system") || strings.HasPrefix(s, "systemd-user")
+}
+
 // splitLineIntoKOV break apart a line into key, operator, value.
 func splitLineIntoKOV(curSection, line string) []string {
 	var kov []string
@@ -84,7 +91,7 @@ func splitLineIntoKOV(curSection, line string) []string {
 		kov = splitRPM(line)
 	} else if curSection == "ArchX86" || curSection == "ArchPPC64LE" {
 		kov = []string{"", "", "", line}
-	} else if curSection == INISectionSystemdSystem || curSection == INISectionSystemdUser {
+	} else if isSystemdConfSection(curSection) {
 		kov = splitSystemdConf(curSection, line)
 	} else {
 		// check for unsupported '/' in the parameter name
@@ -122,7 +129,7 @@ func splitSystemdConf(curSection, line string) []string {
 	}
 	val := strings.TrimLeft(line[opIdx+opLen:], " \t")
 	suffix := " (system.conf)"
-	if curSection == INISectionSystemdUser {
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(curSection)), "systemd-user") {
 		suffix = " (user.conf)"
 	}
 	return []string{line, key + suffix, string(op), val}
@@ -222,7 +229,7 @@ func ParseINI(input string) *INIFile {
 			continue
 		}
 		// remove trailing comments from line
-		if line[0] != '[' && currentSection != INISectionSystemdSystem && currentSection != INISectionSystemdUser {
+		if line[0] != '[' && !isSystemdConfSection(currentSection) {
 			line = system.StripComment(line, `\s#[^#]|"\s#[^#]`)
 		}
 
@@ -238,7 +245,7 @@ func ParseINI(input string) *INIFile {
 			if skipSection {
 				skipSection = false
 			}
-			currentSection = line[1 : len(line)-1]
+			currentSection = strings.TrimSpace(line[1 : len(line)-1])
 			// Normalize Unicode en-dash (–) to ASCII hyphen (-)
 			currentSection = strings.ReplaceAll(currentSection, "–", "-")
 			if currentSection == "" {
@@ -248,6 +255,12 @@ func ParseINI(input string) *INIFile {
 				continue
 			}
 			sectionFields := strings.Split(currentSection, ":")
+			secName := strings.ToLower(strings.TrimSpace(sectionFields[0]))
+			if secName == "systemd-system.conf" || strings.HasPrefix(secName, "systemd-system") {
+				sectionFields[0] = INISectionSystemdSystem
+			} else if secName == "systemd-user.conf" || strings.HasPrefix(secName, "systemd-user") {
+				sectionFields[0] = INISectionSystemdUser
+			}
 
 			// collect system wide sysctl settings
 			if sectionFields[0] == "sysctl" && sysctlCnt == 0 {
@@ -484,7 +497,7 @@ func writeBlockSectionData(curSec string, bdevs, kov []string, curEntriesArray [
 
 // writeSystemdConfSectionData adds values from systemd conf sections to data structures
 func writeSystemdConfSectionData(curSec string, kov []string, curEntriesArray []INIEntry, curEntriesMap map[string]INIEntry) (bool, []INIEntry, map[string]INIEntry) {
-	if curSec != INISectionSystemdSystem && curSec != INISectionSystemdUser {
+	if !isSystemdConfSection(curSec) {
 		return false, curEntriesArray, curEntriesMap
 	}
 	entry := INIEntry{

@@ -649,4 +649,54 @@ DefaultEnvironment=="C=1" "D=2"
 		comp := comparisons2["SysctlParams[DefaultEnvironment (system.conf)]"]
 		t.Errorf("Expected DefaultEnvironment with == to be compliant, but got MatchExpectation=false (act='%s', exp='%s')", comp.ActualValueJS, comp.ExpectedValueJS)
 	}
+
+	// Test 3: DefaultEnvironment="B=2" (single quoted value, quotes must be preserved in drop-in and verify)
+	noteContent3 := `[version]
+VERSION=1
+DATE=02.10.2026
+DESCRIPTION=Test single quoted param
+
+[systemd-system.conf]
+DefaultEnvironment="B=2"
+`
+	notePath3 := filepath.Join(t.TempDir(), "TestListNote3")
+	_ = os.WriteFile(notePath3, []byte(noteContent3), 0644)
+
+	ini3 := INISettings{ConfFilePath: notePath3, ID: "TestListNote3"}
+	insp3, err := ini3.Initialise()
+	if err != nil {
+		t.Fatalf("Initialise failed: %v", err)
+	}
+	opt3, err := insp3.Optimise()
+	if err != nil {
+		t.Fatalf("Optimise failed: %v", err)
+	}
+	opt3 = opt3.(INISettings).SetValuesToApply([]string{"DefaultEnvironment (system.conf)"})
+	err = opt3.Apply()
+	if err != nil {
+		t.Fatalf("Apply failed: %v", err)
+	}
+
+	dropInBytes, err := os.ReadFile(SystemdSystemDropInFile)
+	if err != nil {
+		t.Fatalf("Failed to read drop-in file: %v", err)
+	}
+	if !strings.Contains(string(dropInBytes), "DefaultEnvironment=\"B=2\"") {
+		t.Errorf("Expected quotation marks to be preserved in drop-in file, got:\n%s", string(dropInBytes))
+	}
+
+	// Verify Note 3
+	insp3After, err := ini3.Initialise()
+	if err != nil {
+		t.Fatalf("Initialise after apply failed: %v", err)
+	}
+	allMatch3, comparisons3, _ := CompareNoteFields(insp3After, opt3)
+	if !allMatch3 {
+		comp := comparisons3["SysctlParams[DefaultEnvironment (system.conf)]"]
+		t.Errorf("Expected DefaultEnvironment=\"B=2\" to be compliant, but got MatchExpectation=false (act='%s', exp='%s')", comp.ActualValueJS, comp.ExpectedValueJS)
+	}
+	comp3 := comparisons3["SysctlParams[DefaultEnvironment (system.conf)]"]
+	if comp3.ActualValueJS != "\"B=2\"" || comp3.ExpectedValueJS != "\"B=2\"" {
+		t.Errorf("Expected quotes in ActualValueJS and ExpectedValueJS to be '\"B=2\"', got act='%s', exp='%s'", comp3.ActualValueJS, comp3.ExpectedValueJS)
+	}
 }

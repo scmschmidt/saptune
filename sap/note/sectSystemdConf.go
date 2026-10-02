@@ -715,7 +715,7 @@ func ApplySystemdConf(section, noteID string, entries []txtparser.INIEntry, reve
 	for _, cleanKey := range paramOrder {
 		owner := latestNoteForParam[cleanKey]
 		entry := latestEntryForParam[cleanKey]
-		val := strings.Replace(entry.Value, "\t", " ", -1)
+		val := entry.Value
 		if entry.Operator == txtparser.OperatorResetAssign {
 			linesPerNote[owner] = append(linesPerNote[owner], cleanKey+"=")
 			linesPerNote[owner] = append(linesPerNote[owner], cleanKey+"="+val)
