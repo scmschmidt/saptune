@@ -775,7 +775,7 @@ function file_check() {
             case ${tag} in
                 saptune-3)
                     mandatory_files=( '/etc/sysconfig/saptune' )
-                    invalid_files=( '/etc/saptune/extra/SAP_ASE-SAP_Adaptive_Server_Enterprise.conf' '/etc/saptune/extra/SAP_BOBJ-SAP_Business_OBJects.conf' '/etc/sysconfig/saptune-note-1275776' '/etc/sysconfig/saptune-note-1557506' '/etc/sysconfig/saptune-note-SUSE-GUIDE-01' '/etc/sysconfig/saptune-note-SUSE-GUIDE-02' '/etc/tuned/saptune' )
+                    invalid_files=( '/etc/saptune/extra/SAP_ASE-SAP_Adaptive_Server_Enterprise.conf' '/etc/saptune/extra/SAP_BOBJ-SAP_Business_OBJects.conf' '/etc/sysconfig/saptune-note-1275776' '/etc/sysconfig/saptune-note-1557506' '/etc/sysconfig/saptune-note-SUSE-GUIDE-01' '/etc/sysconfig/saptune-note-SUSE-GUIDE-02' '/etc/tuned/saptune' '/etc/systemd/system.conf.d/80-saptune.conf' '/etc/systemd/user.conf.d/80-saptune.conf' )
                     ;;
             esac
             ;;
@@ -783,7 +783,7 @@ function file_check() {
             case ${tag} in
                 saptune-3)
                     mandatory_files=( '/etc/sysconfig/saptune' )
-                    invalid_files=( '/etc/saptune/extra/SAP_ASE-SAP_Adaptive_Server_Enterprise.conf' '/etc/saptune/extra/SAP_BOBJ-SAP_Business_OBJects.conf' '/etc/sysconfig/saptune-note-1275776' '/etc/sysconfig/saptune-note-1557506' '/etc/sysconfig/saptune-note-SUSE-GUIDE-01' '/etc/sysconfig/saptune-note-SUSE-GUIDE-02' '/etc/tuned/saptune' )
+                    invalid_files=( '/etc/saptune/extra/SAP_ASE-SAP_Adaptive_Server_Enterprise.conf' '/etc/saptune/extra/SAP_BOBJ-SAP_Business_OBJects.conf' '/etc/sysconfig/saptune-note-1275776' '/etc/sysconfig/saptune-note-1557506' '/etc/sysconfig/saptune-note-SUSE-GUIDE-01' '/etc/sysconfig/saptune-note-SUSE-GUIDE-02' '/etc/tuned/saptune' '/etc/systemd/system.conf.d/80-saptune.conf' '/etc/systemd/user.conf.d/80-saptune.conf' )
                     ;;
             esac
             ;;
@@ -791,7 +791,7 @@ function file_check() {
             case ${tag} in
                 saptune-3)
                     mandatory_files=( '/var/lib/saptune/config/saptune' )
-                    invalid_files=( '/etc/saptune/extra/SAP_ASE-SAP_Adaptive_Server_Enterprise.conf' '/etc/saptune/extra/SAP_BOBJ-SAP_Business_OBJects.conf' '/etc/sysconfig/saptune-note-1275776' '/etc/sysconfig/saptune-note-1557506' '/etc/sysconfig/saptune-note-SUSE-GUIDE-01' '/etc/sysconfig/saptune-note-SUSE-GUIDE-02' '/etc/tuned/saptune' '/etc/sysconfig/saptune' )
+                    invalid_files=( '/etc/saptune/extra/SAP_ASE-SAP_Adaptive_Server_Enterprise.conf' '/etc/saptune/extra/SAP_BOBJ-SAP_Business_OBJects.conf' '/etc/sysconfig/saptune-note-1275776' '/etc/sysconfig/saptune-note-1557506' '/etc/sysconfig/saptune-note-SUSE-GUIDE-01' '/etc/sysconfig/saptune-note-SUSE-GUIDE-02' '/etc/tuned/saptune' '/etc/sysconfig/saptune' '/etc/systemd/system.conf.d/80-saptune.conf' '/etc/systemd/user.conf.d/80-saptune.conf' )
                     ;;
             esac
             ;;
@@ -1036,6 +1036,25 @@ function check_saptune() {
             ((fails++))
             ;;
     esac
+
+    # Checking systemd drop-ins ([systemd-system.conf] and [systemd-user.conf]).
+    for conf_type in "system" "user" ; do
+        local run_conf="/run/systemd/${conf_type}.conf.d/80-saptune.conf"
+        local etc_conf_dir="/etc/systemd/${conf_type}.conf.d"
+        if [ -e "${run_conf}" ] ; then
+            msg="saptune systemd drop-in ${run_conf} exists"
+            print_ok "${msg}"
+            add_message_json OK "${msg}"
+            if [ -d "${etc_conf_dir}" ] ; then
+                local etc_conf_files=( $(ls "${etc_conf_dir}"/*.conf 2>/dev/null) )
+                if [ ${#etc_conf_files[@]} -gt 0 ] ; then
+                    msg="systemd ${conf_type}.conf drop-in(s) in ${etc_conf_dir} detected (${etc_conf_files[*]}). Settings in ${etc_conf_dir} have higher priority than saptune."
+                    print_note "${msg}"
+                    add_message_json NOTE "${msg}"
+                fi
+            fi
+        fi
+    done
 
     # Checking status of tuned.service. and the profile.
     if [ -n "${package_version['tuned']}" ] ; then

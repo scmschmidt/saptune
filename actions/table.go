@@ -37,7 +37,7 @@ func PrintNoteFields(writer io.Writer, header string, noteComparisons map[string
 
 	var compliant string
 	var comment string
-	var footnote []string = make([]string, 16)
+	var footnote []string = make([]string, 24)
 
 	colorScheme := getColorScheme()
 	// sort output

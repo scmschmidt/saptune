@@ -14,6 +14,13 @@ const (
 	OperatorMoreThan      = ">"
 	OperatorMoreThanEqual = ">="
 	OperatorEqual         = "="
+	OperatorResetAssign   = "=="
+)
+
+// Supported systemd section names
+const (
+	INISectionSystemdSystem = "systemd-system.conf"
+	INISectionSystemdUser   = "systemd-user.conf"
 )
 
 // Operator is the comparison or assignment operator used in an INI file entry
@@ -77,6 +84,8 @@ func splitLineIntoKOV(curSection, line string) []string {
 		kov = splitRPM(line)
 	} else if curSection == "ArchX86" || curSection == "ArchPPC64LE" {
 		kov = []string{"", "", "", line}
+	} else if curSection == INISectionSystemdSystem || curSection == INISectionSystemdUser {
+		kov = splitSystemdConf(curSection, line)
 	} else {
 		// check for unsupported '/' in the parameter name
 		param := regKey.FindStringSubmatch(line)
@@ -90,6 +99,33 @@ func splitLineIntoKOV(curSection, line string) []string {
 		}
 	}
 	return kov
+}
+
+// splitSystemdConf splits line of section systemd-system.conf or systemd-user.conf
+func splitSystemdConf(curSection, line string) []string {
+	opIdx := strings.Index(line, "==")
+	op := OperatorResetAssign
+	opLen := 2
+	if opIdx == -1 {
+		opIdx = strings.Index(line, "=")
+		op = OperatorEqual
+		opLen = 1
+	}
+	if opIdx == -1 {
+		system.WarningLog("in section '%s' line '%s' contains no valid operator (= or ==). Skipping line", curSection, line)
+		return nil
+	}
+	key := strings.TrimSpace(line[:opIdx])
+	if key == "" {
+		system.WarningLog("in section '%s' line '%s' contains an empty key. Skipping line", curSection, line)
+		return nil
+	}
+	val := strings.TrimLeft(line[opIdx+opLen:], " \t")
+	suffix := " (system.conf)"
+	if curSection == INISectionSystemdUser {
+		suffix = " (user.conf)"
+	}
+	return []string{line, key + suffix, string(op), val}
 }
 
 // splitRPM split line of section rpm into the needed syntax
@@ -186,7 +222,9 @@ func ParseINI(input string) *INIFile {
 			continue
 		}
 		// remove trailing comments from line
-		line = system.StripComment(line, `\s#[^#]|"\s#[^#]`)
+		if line[0] != '[' && currentSection != INISectionSystemdSystem && currentSection != INISectionSystemdUser {
+			line = system.StripComment(line, `\s#[^#]|"\s#[^#]`)
+		}
 
 		if line[0] == '[' {
 			// Save previous section, if valid
@@ -201,6 +239,8 @@ func ParseINI(input string) *INIFile {
 				skipSection = false
 			}
 			currentSection = line[1 : len(line)-1]
+			// Normalize Unicode en-dash (–) to ASCII hyphen (-)
+			currentSection = strings.ReplaceAll(currentSection, "–", "-")
 			if currentSection == "" {
 				// empty section line [], skip whole section
 				system.WarningLog("found empty section definition []. Skipping whole section with all lines till next valid section definition")
@@ -231,7 +271,11 @@ func ParseINI(input string) *INIFile {
 			if chkOk {
 				currentSection = sectionFields[0]
 				currentEntriesArray = make([]INIEntry, 0, 8)
-				currentEntriesMap = make(map[string]INIEntry)
+				if existingMap, ok := ret.KeyValue[currentSection]; ok {
+					currentEntriesMap = existingMap
+				} else {
+					currentEntriesMap = make(map[string]INIEntry)
+				}
 			} else {
 				// skip non-valid section with all lines
 				skipSection = true
@@ -262,6 +306,11 @@ func ParseINI(input string) *INIFile {
 		}
 		// write the block section data
 		next, currentEntriesArray, currentEntriesMap = writeBlockSectionData(currentSection, bdevs, kov, currentEntriesArray, currentEntriesMap)
+		if next {
+			continue
+		}
+		// write the systemd conf section data
+		next, currentEntriesArray, currentEntriesMap = writeSystemdConfSectionData(currentSection, kov, currentEntriesArray, currentEntriesMap)
 		if next {
 			continue
 		}
@@ -431,6 +480,22 @@ func writeBlockSectionData(curSec string, bdevs, kov []string, curEntriesArray [
 		curEntriesMap[entry.Key] = entry
 	}
 	return next, curEntriesArray, curEntriesMap
+}
+
+// writeSystemdConfSectionData adds values from systemd conf sections to data structures
+func writeSystemdConfSectionData(curSec string, kov []string, curEntriesArray []INIEntry, curEntriesMap map[string]INIEntry) (bool, []INIEntry, map[string]INIEntry) {
+	if curSec != INISectionSystemdSystem && curSec != INISectionSystemdUser {
+		return false, curEntriesArray, curEntriesMap
+	}
+	entry := INIEntry{
+		Section:  curSec,
+		Key:      kov[1],
+		Operator: Operator(kov[2]),
+		Value:    kov[3],
+	}
+	curEntriesArray = append(curEntriesArray, entry)
+	curEntriesMap[entry.Key] = entry
+	return true, curEntriesArray, curEntriesMap
 }
 
 // writeMultiValueData handles tunables with more than one value

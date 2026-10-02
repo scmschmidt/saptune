@@ -3,6 +3,7 @@ package system
 import (
 	"fmt"
 	"io/ioutil"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 var systemddvCmd = "/usr/bin/systemd-detect-virt"
 var systemctlCmd = "/usr/bin/systemctl"
+var journalctlCmd = "/usr/bin/journalctl"
 var tunedAdmCmd = "/usr/sbin/tuned-adm"
 var actTunedProfile = "/etc/tuned/active_profile"
 
@@ -202,6 +204,74 @@ func SystemctlDaemonReload() error {
 		ErrorLog("%v - Failed to call systemctl daemon-reload", err)
 	}
 	return err
+}
+
+// SystemctlDaemonReloadWithLogCheck reloads systemd configuration (system or user) and captures logs
+func SystemctlDaemonReloadWithLogCheck(pattern string, user bool) (string, error) {
+	if !CmdIsAvailable(systemctlCmd) {
+		DebugLog("systemctl command '%s' not available, skipping daemon-reload", systemctlCmd)
+		return "", nil
+	}
+
+	scope := ""
+	var cursorArgs []string
+	var reloadArgs []string
+	var logArgs []string
+
+	if user {
+		scope = "--user "
+		cursorArgs = []string{"--user", "-n", "0", "--show-cursor"}
+		reloadArgs = []string{"--user", "daemon-reload"}
+		logArgs = []string{"--user"}
+	} else {
+		cursorArgs = []string{"-n", "0", "--show-cursor"}
+		reloadArgs = []string{"daemon-reload"}
+		logArgs = []string{}
+	}
+
+	cursor := ""
+	if CmdIsAvailable(journalctlCmd) {
+		cursorCmd := exec.Command(journalctlCmd, cursorArgs...)
+		cursorOut, err := cursorCmd.Output()
+		if err == nil {
+			outStr := strings.TrimSpace(string(cursorOut))
+			lines := strings.Split(outStr, "\n")
+			lastLine := lines[len(lines)-1]
+			if strings.HasPrefix(lastLine, "-- cursor: ") {
+				cursor = strings.TrimPrefix(lastLine, "-- cursor: ")
+			}
+		}
+	}
+
+	out, reloadErr := exec.Command(systemctlCmd, reloadArgs...).CombinedOutput()
+	DebugLog("SystemctlDaemonReload - /usr/bin/systemctl %sdaemon-reload : '%+v %s'", scope, reloadErr, strings.TrimSpace(string(out)))
+	if reloadErr != nil {
+		ErrorLog("%v - Failed to call systemctl %sdaemon-reload: %s", reloadErr, scope, strings.TrimSpace(string(out)))
+		fmt.Fprintf(os.Stderr, "Failed to call systemctl %sdaemon-reload: %v - %s\n", scope, reloadErr, strings.TrimSpace(string(out)))
+	}
+
+	var logs string
+	if cursor != "" && CmdIsAvailable(journalctlCmd) {
+		args := append(logArgs, "--after-cursor", cursor, "-t", "systemd")
+		if pattern != "" {
+			args = append(args, "-g", pattern)
+		}
+		logCmd := exec.Command(journalctlCmd, args...)
+		logOut, logErr := logCmd.Output()
+		if logErr == nil {
+			logs = strings.TrimSpace(string(logOut))
+		}
+	}
+
+	if logs != "" {
+		ErrorLog("systemd reported problems for drop-in:\n%s", logs)
+		fmt.Fprintf(os.Stderr, "systemd reported problems for drop-in:\n%s\n", logs)
+		if reloadErr == nil {
+			reloadErr = fmt.Errorf("systemd has detected problems and the tuning might be incomplete")
+		}
+	}
+
+	return logs, reloadErr
 }
 
 // GetSystemState returns the output of 'systemctl is-system-running'

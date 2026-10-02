@@ -506,6 +506,33 @@ After creating the drop-in file the \fIsystemd-logind.service\fP will be reloade
 
 ATTENTION: With this setting your system is vulnerable to fork bomb attacks
 \" _strm_3.2.0_end
+\" section systemd-system.conf
+.SH "[systemd-system.conf]"
+The section "[systemd-system.conf]" configures system-wide defaults for the systemd system manager.
+.br
+Each line is an entry in the form:
+.br
+.BI KEY " " OPERATOR " " VALUE
+.br
+where KEY is a valid systemd system.conf option (e.g. DefaultTimeoutStartSec, DefaultTasksMax), OPERATOR is either '=' or '==', and VALUE is the value to assign.
+.br
+When using the '=' operator, KEY=VALUE is added to the systemd drop-in file \fI/run/systemd/system.conf.d/80-saptune.conf\fP.
+.br
+When using the '==' operator, two lines are added to the drop-in: KEY= (to reset the parameter, which is only meaningful for lists) and KEY=VALUE.
+.br
+After creating or modifying the drop-in file, \fBsystemctl daemon-reload\fP will be executed.
+.br
+Note: Only the systemd drop-in configuration is verified by saptune, as runtime effective settings cannot be fully queried via systemctl for all parameters.
+
+\" section systemd-user.conf
+.SH "[systemd-user.conf]"
+The section "[systemd-user.conf]" configures default settings for systemd user instances.
+.br
+Each line is an entry in the form:
+.br
+.BI KEY " " OPERATOR " " VALUE
+.br
+Settings are written to the drop-in file \fI/run/systemd/user.conf.d/80-saptune.conf\fP and \fBsystemctl --user daemon-reload\fP is called afterwards.
 \" section mem
 .SH "[mem]"
 The section "[mem]" manipulates the size of TMPFS (\fI/dev/shm\fP).

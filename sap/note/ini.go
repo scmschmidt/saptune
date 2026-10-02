@@ -1,6 +1,7 @@
 package note
 
 import (
+	"fmt"
 	"github.com/SUSE/saptune/sap"
 	"github.com/SUSE/saptune/sap/param"
 	"github.com/SUSE/saptune/system"
@@ -13,21 +14,23 @@ import (
 
 // and section name definition
 const (
-	INISectionSysctl    = "sysctl"
-	INISectionSys       = "sys"
-	INISectionVM        = "vm"
-	INISectionFS        = "filesystem"
-	INISectionCPU       = "cpu"
-	INISectionMEM       = "mem"
-	INISectionBlock     = "block"
-	INISectionService   = "service"
-	INISectionLimits    = "limits"
-	INISectionLogin     = "login"
-	INISectionVersion   = "version"
-	INISectionPagecache = "pagecache"
-	INISectionRpm       = "rpm"
-	INISectionGrub      = "grub"
-	INISectionReminder  = "reminder"
+	INISectionSysctl        = "sysctl"
+	INISectionSys           = "sys"
+	INISectionVM            = "vm"
+	INISectionFS            = "filesystem"
+	INISectionCPU           = "cpu"
+	INISectionMEM           = "mem"
+	INISectionBlock         = "block"
+	INISectionService       = "service"
+	INISectionLimits        = "limits"
+	INISectionLogin         = "login"
+	INISectionVersion       = "version"
+	INISectionPagecache     = "pagecache"
+	INISectionRpm           = "rpm"
+	INISectionGrub          = "grub"
+	INISectionReminder      = "reminder"
+	INISectionSystemdSystem = "systemd-system.conf"
+	INISectionSystemdUser   = "systemd-user.conf"
 
 	// LoginConfDir is the path to systemd's logind configuration directory under /etc.
 	LogindConfDir = "/etc/systemd/logind.conf.d"
@@ -140,6 +143,8 @@ func (vend INISettings) Initialise() (Note, error) {
 			continue
 		case INISectionVersion:
 			continue
+		case INISectionSystemdSystem, INISectionSystemdUser:
+			vend.SysctlParams[param.Key], vend.Inform[param.Key], _ = GetSystemdConfVal(param.Section, param.Key, vend.ID)
 		case INISectionPagecache:
 			// page cache is special, has it's own config file
 			// so adjust path to pagecache config file, if needed
@@ -237,6 +242,8 @@ func (vend INISettings) Optimise() (Note, error) {
 			continue
 		case INISectionVersion:
 			continue
+		case INISectionSystemdSystem, INISectionSystemdUser:
+			vend.SysctlParams[param.Key] = OptSystemdConfVal(param.Value)
 		case INISectionPagecache:
 			vend.SysctlParams[param.Key] = OptPagecacheVal(param.Key, param.Value, &pc)
 		default:
@@ -301,6 +308,11 @@ func (vend INISettings) Apply() error {
 		ini.AllValues = append(ini.AllValues, del.AllValues...)
 	}
 
+	systemEntries := []txtparser.INIEntry{}
+	userEntries := []txtparser.INIEntry{}
+	hasSystem := false
+	hasUser := false
+
 	for _, param := range ini.AllValues {
 		// handle note 1805750
 		param.Key, param.Value = vend.handleID1805750(param.Key, param.Value)
@@ -347,6 +359,14 @@ func (vend INISettings) Apply() error {
 			errs = append(errs, SetMemVal(param.Key, vend.SysctlParams[param.Key]))
 		case INISectionCPU:
 			errs = append(errs, SetCPUVal(param.Key, vend.SysctlParams[param.Key], vend.ID, flstates, vend.OverrideParams[param.Key], revertValues))
+		case INISectionSystemdSystem:
+			hasSystem = true
+			param.Value = vend.SysctlParams[param.Key]
+			systemEntries = append(systemEntries, param)
+		case INISectionSystemdUser:
+			hasUser = true
+			param.Value = vend.SysctlParams[param.Key]
+			userEntries = append(userEntries, param)
 		case INISectionPagecache:
 			if revertValues {
 				switch param.Key {
@@ -362,7 +382,66 @@ func (vend INISettings) Apply() error {
 			continue
 		}
 	}
+
+	changedSystem := false
+	changedUser := false
+	if hasSystem {
+		chg, sErr := ApplySystemdConf(INISectionSystemdSystem, vend.ID, systemEntries, revertValues)
+		if sErr != nil {
+			errs = append(errs, sErr)
+		} else {
+			errs = append(errs, nil)
+		}
+		if chg {
+			changedSystem = true
+		}
+	}
+	if hasUser {
+		chg, uErr := ApplySystemdConf(INISectionSystemdUser, vend.ID, userEntries, revertValues)
+		if uErr != nil {
+			errs = append(errs, uErr)
+		} else {
+			errs = append(errs, nil)
+		}
+		if chg {
+			changedUser = true
+		}
+	}
+
+	var systemdReloadErr error
+	if changedSystem {
+		logs, rErr := system.SystemctlDaemonReloadWithLogCheck("80-saptune\\.conf", false)
+		if rErr != nil {
+			systemdReloadErr = rErr
+		}
+		if revertValues {
+			RemoveSystemdComplaints(INISectionSystemdSystem, vend.ID)
+		} else {
+			complainedKeys := ExtractSystemdComplainedKeys(SystemdSystemDropInFile, logs)
+			RecordSystemdComplaints(INISectionSystemdSystem, vend.ID, complainedKeys)
+		}
+	}
+	if changedUser {
+		logs, rErr := system.SystemctlDaemonReloadWithLogCheck("80-saptune\\.conf", true)
+		if rErr != nil && systemdReloadErr == nil {
+			systemdReloadErr = rErr
+		}
+		if revertValues {
+			RemoveSystemdComplaints(INISectionSystemdUser, vend.ID)
+		} else {
+			complainedKeys := ExtractSystemdComplainedKeys(SystemdUserDropInFile, logs)
+			RecordSystemdComplaints(INISectionSystemdUser, vend.ID, complainedKeys)
+		}
+	}
+
 	err = sap.PrintErrors(errs)
+	if systemdReloadErr != nil {
+		action := "tuning"
+		if revertValues {
+			action = "revert"
+		}
+		err = fmt.Errorf("systemd has detected problems and the %s might be incomplete", action)
+	}
 	return err
 }
 

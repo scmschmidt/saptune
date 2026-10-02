@@ -30,6 +30,11 @@ const (
 	footnote14   = "[14] the parameter value exceeds the maximum possible number of open files. Check and increase fs.nr_open if really needed."
 	footnote15   = "[15] the parameter is only used to calculate the size of tmpfs (/dev/shm)"
 	footnote16   = "[16] parameter not available on the system, setting not possible"
+	footnote18   = "[18] Only the systemd configuration is verified!"
+	footnote20   = "[20] systemd complained about PARAM during apply! Check the logs!"
+	footnote21   = "[21] Expected parameter PARAM is missing in the drop-in! File FILE must have been modified outside saptune!"
+	footnote22   = "[22] PARAM has been configured too in FILE which has higher priority."
+	footnote23   = "[23] PARAM has been configured too in FILE which got overridden by saptune."
 )
 
 // set 'unsupported' footnote regarding the architecture
@@ -104,6 +109,8 @@ func prepareFootnote(comparison note.FieldComparison, compliant, comment, inform
 	compliant, comment, footnote = setNofile(comparison.ReflectMapKey, compliant, comment, inform, footnote)
 	// set footnote for VSZ_TMPFS_PERCENT parameter from mem section
 	compliant, comment, footnote = setMem(comparison.ReflectMapKey, compliant, comment, footnote)
+	// set footnote for systemd configuration sections [17],[18],[19]
+	compliant, comment, footnote = setSystemdConf(comparison, compliant, comment, inform, footnote)
 	return compliant, comment, footnote
 }
 
@@ -304,4 +311,64 @@ func writeFN(footnote, fntxt, info, pat string) string {
 		footnote = footnote + "\n " + strings.Replace(fntxt, pat, info, 1)
 	}
 	return footnote
+}
+
+// setSystemdConf sets footnotes for systemd configuration parameters
+func setSystemdConf(comparison note.FieldComparison, compliant, comment, inform string, footnote []string) (string, string, []string) {
+	mapKey := comparison.ReflectMapKey
+	if !strings.HasSuffix(mapKey, " (system.conf)") && !strings.HasSuffix(mapKey, " (user.conf)") {
+		return compliant, comment, footnote
+	}
+	paramName := strings.TrimSuffix(strings.TrimSuffix(mapKey, " (system.conf)"), " (user.conf)")
+
+	// Footnote [18] is always set for systemd configuration entries
+	compliant = compliant + " [18]"
+	comment = comment + " [18]"
+	footnote[17] = footnote18
+
+	if inform != "" && inform != "missing_file" && inform != "ok" {
+		parts := strings.Split(inform, "§")
+		for _, part := range parts {
+			if part == "complaint" {
+				compliant = compliant + " [20]"
+				comment = comment + " [20]"
+				footnote[19] = writeFNSystemd(footnote[19], footnote20, paramName, "")
+			} else if strings.HasPrefix(part, "missing_param:") {
+				dropInPath := strings.TrimPrefix(part, "missing_param:")
+				compliant = compliant + " [21]"
+				comment = comment + " [21]"
+				footnote[20] = writeFNSystemd(footnote[20], footnote21, paramName, dropInPath)
+			} else if strings.HasPrefix(part, "high:") {
+				filesStr := strings.TrimPrefix(part, "high:")
+				files := strings.Split(filesStr, ";")
+				compliant = compliant + " [22]"
+				comment = comment + " [22]"
+				for _, f := range files {
+					if f != "" {
+						footnote[21] = writeFNSystemd(footnote[21], footnote22, paramName, f)
+					}
+				}
+			} else if strings.HasPrefix(part, "low:") {
+				filesStr := strings.TrimPrefix(part, "low:")
+				files := strings.Split(filesStr, ";")
+				compliant = compliant + " [23]"
+				comment = comment + " [23]"
+				for _, f := range files {
+					if f != "" {
+						footnote[22] = writeFNSystemd(footnote[22], footnote23, paramName, f)
+					}
+				}
+			}
+		}
+	}
+	return compliant, comment, footnote
+}
+
+func writeFNSystemd(fn, template, param, file string) string {
+	res := strings.Replace(template, "PARAM", param, 1)
+	res = strings.Replace(res, "FILE", file, 1)
+	if fn == "" {
+		return res
+	}
+	return fn + "\n " + res
 }

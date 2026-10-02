@@ -303,6 +303,17 @@ func cmpMapValue(fieldName string, key reflect.Value, actVal, expVal interface{}
 	if strings.Split(key.String(), ":")[0] == "systemd" {
 		match = system.CmpServiceStates(actVal.(string), expVal.(string))
 	}
+	if strings.HasSuffix(key.String(), " (system.conf)") || strings.HasSuffix(key.String(), " (user.conf)") {
+		if !match && actVal != nil && expVal != nil {
+			actStr, ok1 := actVal.(string)
+			expStr, ok2 := expVal.(string)
+			if ok1 && ok2 {
+				if strings.ReplaceAll(actStr, "\t", " ") == strings.ReplaceAll(expStr, "\t", " ") {
+					match = true
+				}
+			}
+		}
+	}
 	if expVal == "" {
 		// if the expected value is empty, the parameter value will
 		// be untouched
