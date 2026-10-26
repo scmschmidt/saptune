@@ -65,6 +65,12 @@ func chkSecTags(secFields, blkDev []string) (bool, []string) {
 			ret = chkCPUTags(tagField[1], secFields)
 		case "kernel":
 			ret = chkKernelTags(tagField[1], secFields)
+		case "hostname":
+			ret = chkHostnameTags(tagField[1], secFields)
+		case "dnsdomainname":
+			ret = chkDNSDomainnameTags(tagField[1], secFields)
+		case "fqdn":
+			ret = chkFqdnTags(tagField[1], secFields)
 		default:
 			ret = chkOtherTags(tagField[0], tagField[1], secFields)
 		}
@@ -207,6 +213,51 @@ func chkKernelTags(tagField string, secFields []string) bool {
 	if !re.MatchString(chkKernel) {
 		// running kernel does not match
 		system.InfoLog("kernel release '%s' in section definition '%v' does not match the running kernel '%s'. Skipping whole section with all lines till next valid section definition", tagField, secFields, chkKernel)
+		ret = false
+	}
+	return ret
+}
+
+// chkHostnameTags checks if the hostname section tag is valid or not
+func chkHostnameTags(tagField string, secFields []string) bool {
+	return chkHostTags("hostname", tagField, secFields)
+}
+
+// chkDNSDomainnameTags checks if the dnsdomainname section tag is valid or not
+func chkDNSDomainnameTags(tagField string, secFields []string) bool {
+	return chkHostTags("dnsdomainname", tagField, secFields)
+}
+
+// chkFqdnTags checks if the fqdn section tag is valid or not
+func chkFqdnTags(tagField string, secFields []string) bool {
+	return chkHostTags("fqdn", tagField, secFields)
+}
+
+// chkHostTags checks if the hostname, dnsdomainname or fqdn section tag is valid or not
+func chkHostTags(tag, tagField string, secFields []string) bool {
+	ret := true
+	re, err := regexp.Compile(tagField)
+	if err != nil {
+		system.InfoLog("invalid regular expression '%s' for %s in section definition '%v'. Skipping whole section with all lines till next valid section definition", tagField, tag, secFields)
+		return false
+	}
+	var val string
+	switch tag {
+	case "hostname":
+		val, err = system.GetHostname()
+	case "dnsdomainname":
+		val, err = system.GetDNSDomainname()
+	case "fqdn":
+		val, err = system.GetFQDN()
+	default:
+		return false
+	}
+	if err != nil {
+		system.InfoLog("command to retrieve %s reported an error or non-zero exit code. Skipping whole section '%v' with all lines till next valid section definition", tag, secFields)
+		return false
+	}
+	if !re.MatchString(val) {
+		system.InfoLog("%s '%s' in section definition '%v' does not match the %s of the running system ('%s'). Skipping whole section with all lines till next valid section definition", tag, tagField, secFields, tag, val)
 		ret = false
 	}
 	return ret
