@@ -508,6 +508,37 @@ func TestChkCliSyntax(t *testing.T) {
 		t.Errorf("Test failed, expected good syntax, but got 'wrong'")
 	}
 
+	// {"saptune", "--fun", "--eliza"} -> ok
+	os.Args = []string{"saptune", "--fun", "--eliza"}
+	saptArgs, saptFlags = ParseCliArgs()
+	if !ChkCliSyntax() {
+		t.Errorf("Test failed, expected good syntax for --fun --eliza, but got 'wrong'")
+	}
+	if !IsFlagSet("fun") || !IsFlagSet("eliza") {
+		t.Errorf("Test failed, expected both fun and eliza flags set")
+	}
+
+	// {"saptune", "--eliza", "--fun"} -> ok
+	os.Args = []string{"saptune", "--eliza", "--fun"}
+	saptArgs, saptFlags = ParseCliArgs()
+	if !ChkCliSyntax() {
+		t.Errorf("Test failed, expected good syntax for --eliza --fun, but got 'wrong'")
+	}
+
+	// {"saptune", "--eliza"} -> wrong (requires --fun)
+	os.Args = []string{"saptune", "--eliza"}
+	saptArgs, saptFlags = ParseCliArgs()
+	if ChkCliSyntax() {
+		t.Errorf("Test failed, expected wrong syntax for --eliza without --fun, but got 'good'")
+	}
+
+	// {"saptune", "--fun", "--eliza", "note"} -> wrong (too many arguments)
+	os.Args = []string{"saptune", "--fun", "--eliza", "note"}
+	saptArgs, saptFlags = ParseCliArgs()
+	if ChkCliSyntax() {
+		t.Errorf("Test failed, expected wrong syntax for --fun --eliza with extra arguments, but got 'good'")
+	}
+
 	// reset CLI flags and args
 	saptArgs = []string{}
 	saptFlags = map[string]string{}

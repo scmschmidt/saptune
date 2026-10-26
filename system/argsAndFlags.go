@@ -56,7 +56,7 @@ func GetFlagVal(flag string) string {
 func ParseCliArgs() ([]string, map[string]string) {
 	stArgs := []string{}
 	// supported flags
-	stFlags := map[string]string{"force": "false", "dryrun": "false", "help": "false", "version": "false", "show-non-compliant": "false", "format": "", "colorscheme": "", "non-compliance-check": "false", "notSupported": "", "force-color": "false", "fun": "false"}
+	stFlags := map[string]string{"force": "false", "dryrun": "false", "help": "false", "version": "false", "show-non-compliant": "false", "format": "", "colorscheme": "", "non-compliance-check": "false", "notSupported": "", "force-color": "false", "fun": "false", "eliza": "false"}
 	skip := false
 	for i, arg := range os.Args {
 		if skip {
@@ -129,6 +129,8 @@ func handleSimpleFlags(arg string, flags map[string]string) {
 		flags["force-color"] = "true"
 	case "--fun", "-fun":
 		flags["fun"] = "true"
+	case "--eliza", "-eliza":
+		flags["eliza"] = "true"
 	default:
 		setUnsupportedFlag(arg, flags)
 	}
@@ -175,15 +177,21 @@ func ChkCliSyntax() bool {
 func chkGlobalSyntax(cmdLinePos map[string]int) bool {
 	DebugLog("chkGlobalSyntax - cmdLinePos is '%+v'", cmdLinePos)
 	ret := true
+	isEliza := IsFlagSet("fun") && IsFlagSet("eliza")
 	// check minimum of arguments without flags (saptune + realm)
-	if (IsFlagSet("version") || IsFlagSet("help")) && len(saptArgs) > 1 {
+	if (IsFlagSet("version") || IsFlagSet("help") || isEliza) && len(saptArgs) > 1 {
 		// too many arguments
 		DebugLog("chkGlobalSyntax failed - too many arguments")
 		ret = false
 	}
-	if !IsFlagSet("version") && !IsFlagSet("help") && len(saptArgs) < 2 {
+	if !IsFlagSet("version") && !IsFlagSet("help") && !isEliza && len(saptArgs) < 2 {
 		// too few arguments
 		DebugLog("chkGlobalSyntax failed - too few arguments")
+		ret = false
+	}
+	if IsFlagSet("eliza") && !IsFlagSet("fun") {
+		// eliza requires fun
+		DebugLog("chkGlobalSyntax failed - '--eliza' requires '--fun'")
 		ret = false
 	}
 	if IsFlagSet("notSupported") {
@@ -216,7 +224,7 @@ func chkGlobalSyntax(cmdLinePos map[string]int) bool {
 // saptune --version or saptune --help
 func chkGlobalOpts(cmdLinePos map[string]int) bool {
 	DebugLog("chkGlobalOpts - cmdLinePos is '%+v'", cmdLinePos)
-	globalFlags := []string{"format", "version", "help", "force-color", "fun"}
+	globalFlags := []string{"format", "version", "help", "force-color", "fun", "eliza"}
 	stArgs := os.Args
 	ret := true
 	if len(stArgs) < 1 {

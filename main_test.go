@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"strings"
 	"testing"
 )
 
@@ -226,6 +227,43 @@ func TestCtrlClArgs(t *testing.T) {
 	// cleanup
 	os.Args = orgArgs
 	system.RereadArgs()
+}
+
+func TestCtrlClArgsEliza(t *testing.T) {
+	orgArgs := os.Args
+	defer func() {
+		os.Args = orgArgs
+		system.RereadArgs()
+	}()
+
+	buffer := bytes.Buffer{}
+	oldOSExit := system.OSExit
+	defer func() { system.OSExit = oldOSExit }()
+	system.OSExit = tstosExit
+
+	oldErrorExitOut := system.ErrorExitOut
+	defer func() { system.ErrorExitOut = oldErrorExitOut }()
+	system.ErrorExitOut = tstErrorExitOut
+
+	errExitbuffer := bytes.Buffer{}
+	tstwriter = &errExitbuffer
+	tstRetErrorExit = -1
+
+	os.Args = []string{"saptune", "--fun", "--eliza"}
+	system.RereadArgs()
+	origElizaIn := elizaIn
+	elizaIn = strings.NewReader("bye\n")
+	defer func() { elizaIn = origElizaIn }()
+
+	ctrlClArgs(&buffer)
+
+	txt := buffer.String()
+	if !strings.Contains(txt, "ELIZA:") || !strings.Contains(txt, "How do you do") {
+		t.Errorf("expected ELIZA session output, got: %s", txt)
+	}
+	if tstRetErrorExit != 0 {
+		t.Errorf("error exit should be '0' and NOT '%v'\n", tstRetErrorExit)
+	}
 }
 
 func TestCallSaptuneCheckScript(t *testing.T) {
