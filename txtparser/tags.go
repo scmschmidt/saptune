@@ -18,9 +18,15 @@ func isTagAvail(tag string, secFields []string) bool {
 			cnt = cnt + 1
 			continue
 		}
+		if strings.HasPrefix(secTag, "meminfo%") {
+			if tag == "meminfo" {
+				return true
+			}
+			continue
+		}
 		tagField := strings.Split(secTag, "=")
 		if len(tagField) != 2 {
-			return false
+			continue
 		}
 		if tag == tagField[0] {
 			return true
@@ -28,6 +34,9 @@ func isTagAvail(tag string, secFields []string) bool {
 	}
 	return false
 }
+
+// regMeminfoTag parses meminfo%<KEY><OPERATOR><VALUE> tags
+var regMeminfoTag = regexp.MustCompile(`^meminfo%([A-Za-z0-9_()]+)\s*(<=|>=|==|!=|<|>)\s*([0-9]+)$`)
 
 // chkSecTags checks, if the tags of a section are valid
 func chkSecTags(secFields, blkDev []string) (bool, []string) {
@@ -41,6 +50,13 @@ func chkSecTags(secFields, blkDev []string) (bool, []string) {
 		}
 		if secTag == "" {
 			// support empty tags
+			continue
+		}
+		if strings.HasPrefix(secTag, "meminfo%") {
+			ret = chkMeminfoTags(secTag, secFields)
+			if !ret {
+				break
+			}
 			continue
 		}
 		tagField := strings.Split(secTag, "=")
@@ -73,6 +89,56 @@ func chkSecTags(secFields, blkDev []string) (bool, []string) {
 		}
 	}
 	return ret, blkDev
+}
+
+// chkMeminfoTags checks if the meminfo section tag is valid and matches the system state
+func chkMeminfoTags(secTag string, secFields []string) bool {
+	m := regMeminfoTag.FindStringSubmatch(secTag)
+	if len(m) != 4 {
+		system.WarningLog("wrong syntax of meminfo section tag '%s', skipping whole section '%v'. Please check. ", secTag, secFields)
+		return false
+	}
+	key := m[1]
+	op := m[2]
+	valStr := m[3]
+
+	targetVal, err := strconv.ParseUint(valStr, 10, 64)
+	if err != nil {
+		system.WarningLog("invalid value '%s' in meminfo section tag '%s', skipping whole section '%v'. Please check. ", valStr, secTag, secFields)
+		return false
+	}
+
+	actualVal, err := system.GetMeminfoEntry(key)
+	if err != nil {
+		system.InfoLog("meminfo key '%s' in section definition '%v' not found in %s. Skipping whole section with all lines till next valid section definition", key, secFields, system.ProcMeminfo)
+		return false
+	}
+
+	var match bool
+	switch op {
+	case "==":
+		match = (actualVal == targetVal)
+	case "!=":
+		match = (actualVal != targetVal)
+	case "<":
+		match = (actualVal < targetVal)
+	case "<=":
+		match = (actualVal <= targetVal)
+	case ">":
+		match = (actualVal > targetVal)
+	case ">=":
+		match = (actualVal >= targetVal)
+	default:
+		system.WarningLog("unsupported operator '%s' in meminfo section tag '%s', skipping whole section '%v'. Please check. ", op, secTag, secFields)
+		return false
+	}
+
+	if !match {
+		system.InfoLog("meminfo key '%s' value '%d' in section definition '%v' does not match condition '%s %d'. Skipping whole section with all lines till next valid section definition", key, actualVal, secFields, op, targetVal)
+		return false
+	}
+
+	return true
 }
 
 // chkOsTags checks if the os section tag is valid or not

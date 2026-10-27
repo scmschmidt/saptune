@@ -15,14 +15,16 @@ const (
 	MemSwapTotalKey = "SwapTotal"
 )
 
-// ParseMeminfo parse /proc/meminfo into key(string) - value(int) pairs.
-// Panic on error.
-func ParseMeminfo() (infoMap map[string]uint64) {
-	infoMap = make(map[string]uint64)
-	memInfo, err := os.ReadFile("/proc/meminfo")
+// ProcMeminfo is the path to the /proc/meminfo file
+var ProcMeminfo = "/proc/meminfo"
+
+// ReadMeminfo parses ProcMeminfo into key(string) - value(uint64) pairs.
+func ReadMeminfo() (map[string]uint64, error) {
+	memInfo, err := os.ReadFile(ProcMeminfo)
 	if err != nil {
-		panic(fmt.Errorf("failed to read /proc/meminfo: %v", err))
+		return nil, fmt.Errorf("failed to read %s: %v", ProcMeminfo, err)
 	}
+	infoMap := make(map[string]uint64)
 	for _, line := range strings.Split(string(memInfo), "\n") {
 		fields := consecutiveSpaces.Split(strings.TrimSpace(line), -1)
 		if len(fields) <= 1 {
@@ -30,12 +32,39 @@ func ParseMeminfo() (infoMap map[string]uint64) {
 		}
 		// First field is name with a suffix colon
 		name := fields[0]
+		if !strings.HasSuffix(name, ":") {
+			continue
+		}
 		// The second field is an integer value
 		value, err := strconv.ParseUint(fields[1], 10, 64)
 		if err != nil {
-			panic(fmt.Errorf("failed to parse uint64 value from '%s' in /proc/meminfo", line))
+			continue
 		}
 		infoMap[name[0:len(name)-1]] = value
+	}
+	return infoMap, nil
+}
+
+// GetMeminfoEntry returns the value of a specific key from ProcMeminfo.
+func GetMeminfoEntry(key string) (uint64, error) {
+	infoMap, err := ReadMeminfo()
+	if err != nil {
+		return 0, err
+	}
+	val, ok := infoMap[key]
+	if !ok {
+		return 0, fmt.Errorf("key '%s' not found in %s", key, ProcMeminfo)
+	}
+	return val, nil
+}
+
+// ParseMeminfo parse /proc/meminfo into key(string) - value(int) pairs.
+// Panic on error.
+func ParseMeminfo() (infoMap map[string]uint64) {
+	var err error
+	infoMap, err = ReadMeminfo()
+	if err != nil {
+		panic(err)
 	}
 	return
 }
