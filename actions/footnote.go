@@ -31,6 +31,9 @@ const (
 	footnote15   = "[15] the parameter is only used to calculate the size of tmpfs (/dev/shm)"
 	footnote16   = "[16] parameter not available on the system, setting not possible"
 	footnote17   = "[17] CURNOTE: value of PARAM has been set later by Note LASTNOTEID"
+	footnote18   = "[18] another modprobe configuration entry takes precedence over the saptune entry"
+	footnote19   = "[19] the module was already loaded when the entry was applied; blocking or blacklisting does not unload it"
+	footnote20   = "[20] after a permanent entry, re-create the initrd if the module is still loaded after a reboot"
 )
 
 // set 'unsupported' footnote regarding the architecture
@@ -57,6 +60,9 @@ func prepFN(comparison note.FieldComparison, compliant, inform string) bool {
 			prep = true
 		}
 		if strings.Contains(comparison.ReflectMapKey, "xfsopt_") {
+			prep = true
+		}
+		if strings.HasPrefix(comparison.ReflectMapKey, "kmod:") && (strings.Contains(inform, "masked") || strings.Contains(inform, "loaded_on_apply")) {
 			prep = true
 		}
 	}
@@ -105,6 +111,8 @@ func prepareFootnote(comparison note.FieldComparison, compliant, comment, inform
 	compliant, comment, footnote = setNofile(comparison.ReflectMapKey, compliant, comment, inform, footnote)
 	// set footnote for VSZ_TMPFS_PERCENT parameter from mem section
 	compliant, comment, footnote = setMem(comparison.ReflectMapKey, compliant, comment, footnote)
+	// set footnotes for kmod section entries [18],[19],[20]
+	compliant, comment, footnote = setKmodFootnotes(comparison, compliant, comment, inform, footnote)
 	return compliant, comment, footnote
 }
 
@@ -292,6 +300,44 @@ func setMem(mapKey, compliant, comment string, footnote []string) (string, strin
 			compliant = " -  [15]"
 			comment = comment + " [15]"
 			footnote[14] = footnote15
+		}
+	}
+	return compliant, comment, footnote
+}
+
+// setKmodFootnotes sets footnotes [18], [19], [20] for kernel module entries
+func setKmodFootnotes(comparison note.FieldComparison, compliant, comment, inform string, footnote []string) (string, string, []string) {
+	if !strings.HasPrefix(comparison.ReflectMapKey, "kmod:") || inform == "" {
+		return compliant, comment, footnote
+	}
+
+	flags := strings.Split(inform, "§")
+	for _, flag := range flags {
+		switch flag {
+		case "masked":
+			if strings.Contains(compliant, "yes") {
+				compliant = strings.Replace(compliant, "yes", "no ", 1)
+			}
+			compliant = compliant + " [18]"
+			comment = comment + " [18]"
+			if len(footnote) > 17 {
+				footnote[17] = footnote18
+			}
+		case "loaded_on_apply":
+			if strings.Contains(compliant, "yes") {
+				compliant = strings.Replace(compliant, "yes", "no ", 1)
+			}
+			compliant = compliant + " [19]"
+			comment = comment + " [19]"
+			if len(footnote) > 18 {
+				footnote[18] = footnote19
+			}
+		case "permanent":
+			compliant = compliant + " [20]"
+			comment = comment + " [20]"
+			if len(footnote) > 19 {
+				footnote[19] = footnote20
+			}
 		}
 	}
 	return compliant, comment, footnote

@@ -398,6 +398,44 @@ This section has to contain the following option:
   file.
 --
 +
+*[kmod]*::
+The section *[kmod]* configures Linux kernel module behavior.
+Entries define kernel module actions using the syntax:
++
+....
+MODULE = ACTION[+OPTION...] [PARAM=VALUE...]
+....
++
+Supported actions:
++
+--
+*blacklist*;;
+  Blacklists the module so that it is not loaded automatically by hardware or protocol triggers.
+  Supported option: *+permanent* (writes configuration to _/etc/modprobe.d/80-saptune-permanent.conf_ instead of _/run/modprobe.d/80-saptune.conf_, surviving reboots and not reverted by *saptune*).
+
+*block*;;
+  Blocks the module from loading by installing _/bin/false_ as its install command.
+  Supported option: *+permanent* (writes configuration to _/etc/modprobe.d/80-saptune-permanent.conf_ instead of _/run/modprobe.d/80-saptune.conf_, surviving reboots and not reverted by *saptune*).
+
+*load*;;
+  Loads the kernel module, optionally with runtime module parameters.
+  _Note:_ Planned for a future release (currently rejected with an error).
+  Supported options when implemented: *+keep* and *+no-reload*.
+
+*unload*;;
+  Unloads the kernel module.
+  _Note:_ Planned for a future release (currently rejected with an error).
+  Supported option when implemented: *+keep*.
+--
++
+Footnotes used during *verify*:
++
+--
+* *[18]* another modprobe configuration entry takes precedence over the saptune entry.
+* *[19]* the module was already loaded when the entry was applied; blocking or blacklisting does not unload it.
+* *[20]* after a permanent entry, re-create the initrd if the module is still loaded after a reboot.
+--
++
 *[login]*::
 The section *[login]* manipulates the behavior of the systemd login
 manager. +
@@ -1026,6 +1064,18 @@ _/etc/saptune/override_
 ____
 The directory contains overrides for Notes created by *saptune note
 customise NOTEID*
+____
+
+_/run/modprobe.d/80-saptune.conf_
+
+____
+Transient modprobe configuration file managed by *saptune* for non-permanent *[kmod]* actions.
+____
+
+_/etc/modprobe.d/80-saptune-permanent.conf_
+
+____
+Permanent modprobe configuration file created by *saptune* when *+permanent* is specified.
 ____
 
 == SEE ALSO

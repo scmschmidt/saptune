@@ -28,6 +28,7 @@ const (
 	INISectionRpm       = "rpm"
 	INISectionGrub      = "grub"
 	INISectionReminder  = "reminder"
+	INISectionKmod      = "kmod"
 
 	// LoginConfDir is the path to systemd's logind configuration directory under /etc.
 	LogindConfDir = "/etc/systemd/logind.conf.d"
@@ -122,6 +123,8 @@ func (vend INISettings) Initialise() (Note, error) {
 			vend.SysctlParams[param.Key], vend.Inform[param.Key], _ = GetLimitsVal(param.Value)
 		case INISectionService:
 			vend.SysctlParams[param.Key] = GetServiceVal(param.Key, param.Value)
+		case INISectionKmod:
+			vend.SysctlParams[param.Key] = GetKmodVal(param.Key, param.Value)
 		case INISectionLogin:
 			vend.SysctlParams[param.Key], _ = GetLoginVal(param.Key)
 		case INISectionMEM:
@@ -212,6 +215,9 @@ func (vend INISettings) Optimise() (Note, error) {
 			vend.SysctlParams[param.Key] = OptLimitsVal(vend.SysctlParams[param.Key], param.Value)
 		case INISectionService:
 			vend.SysctlParams[param.Key] = OptServiceVal(param.Key, param.Value)
+		case INISectionKmod:
+			vend.SysctlParams[param.Key] = OptKmodVal(param.Key, param.Value, vend.SysctlParams[param.Key])
+			vend.Inform[param.Key] = GetKmodInform(param.Key, param.Value, vend.SysctlParams[param.Key])
 		case INISectionLogin:
 			vend.SysctlParams[param.Key] = OptLoginVal(param.Value)
 		case INISectionMEM:
@@ -346,6 +352,8 @@ func (vend INISettings) Apply() error {
 			errs = append(errs, SetLimitsVal(param.Key, pvendID, vend.SysctlParams[param.Key], revertValues))
 		case INISectionService:
 			errs = append(errs, SetServiceVal(param.Key, vend.SysctlParams[param.Key]))
+		case INISectionKmod:
+			errs = append(errs, SetKmodVal(param.Key, vend.SysctlParams[param.Key], param.Value, revertValues))
 		case INISectionLogin:
 			errs = append(errs, SetLoginVal(param.Key, vend.SysctlParams[param.Key], revertValues))
 		case INISectionMEM:

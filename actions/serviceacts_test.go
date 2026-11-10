@@ -260,6 +260,7 @@ func TestServiceActions(t *testing.T) {
 
 	// Test ServiceActionStatus
 	t.Run("ServiceActionStatus", func(t *testing.T) {
+		_ = system.TunedAdmOff()
 		ServiceActionStart(false, sApp)
 
 		oldOSExit := system.OSExit

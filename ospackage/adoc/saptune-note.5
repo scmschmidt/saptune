@@ -17,13 +17,13 @@
 '\" t
 .\"     Title: saptune-note
 .\"    Author: Angela Briel, Soeren Schmidt
-.\" Generator: Asciidoctor 2.0.23
-.\"      Date: 2026-10-16
+.\" Generator: Asciidoctor 2.0.18
+.\"      Date: 2026-11-10
 .\"    Manual: saptune note file format description
 .\"    Source: saptune
 .\"  Language: English
 .\"
-.TH "SAPTUNE\-NOTE" "5" "2026-10-16" "saptune" "saptune note file format description"
+.TH "SAPTUNE\-NOTE" "5" "2026-11-10" "saptune" "saptune note file format description"
 .ie \n(.g .ds Aq \(aq
 .el       .ds Aq '
 .ss \n[.ss] 0
@@ -672,6 +672,83 @@ To leave only \fBsome\fP of the limits definitions of a Note definition
 file \*(Aquntouched\*(Aq in the system, remove these limits definitions from
 the \fBLIMITS\fP string in the \fBoverride file\fP of the Note definition
 file.
+.RE
+.RE
+.sp
+\fB[kmod]\fP
+.RS 4
+The section \fB[kmod]\fP configures Linux kernel module behavior.
+Entries define kernel module actions using the syntax:
+.sp
+.if n .RS 4
+.nf
+.fam C
+MODULE = ACTION[+OPTION...] [PARAM=VALUE...]
+.fam
+.fi
+.if n .RE
+.sp
+Supported actions:
+.sp
+\fBblacklist\fP
+.RS 4
+Blacklists the module so that it is not loaded automatically by hardware or protocol triggers.
+Supported option: \fB+permanent\fP (writes configuration to \fI/etc/modprobe.d/80\-saptune\-permanent.conf\fP instead of \fI/run/modprobe.d/80\-saptune.conf\fP, surviving reboots and not reverted by \fBsaptune\fP).
+.RE
+.sp
+\fBblock\fP
+.RS 4
+Blocks the module from loading by installing \fI/bin/false\fP as its install command.
+Supported option: \fB+permanent\fP (writes configuration to \fI/etc/modprobe.d/80\-saptune\-permanent.conf\fP instead of \fI/run/modprobe.d/80\-saptune.conf\fP, surviving reboots and not reverted by \fBsaptune\fP).
+.RE
+.sp
+\fBload\fP
+.RS 4
+Loads the kernel module, optionally with runtime module parameters.
+\fINote:\fP Planned for a future release (currently rejected with an error).
+Supported options when implemented: \fB+keep\fP and \fB+no\-reload\fP.
+.RE
+.sp
+\fBunload\fP
+.RS 4
+Unloads the kernel module.
+\fINote:\fP Planned for a future release (currently rejected with an error).
+Supported option when implemented: \fB+keep\fP.
+.RE
+.sp
+Footnotes used during \fBverify\fP:
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+\fB[18]\fP another modprobe configuration entry takes precedence over the saptune entry.
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+\fB[19]\fP the module was already loaded when the entry was applied; blocking or blacklisting does not unload it.
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.  sp -1
+.  IP \(bu 2.3
+.\}
+\fB[20]\fP after a permanent entry, re\-create the initrd if the module is still loaded after a reboot.
 .RE
 .RE
 .sp
@@ -1553,6 +1630,24 @@ The directory contains vendor or customer specific Notes created by
 .sp
 The directory contains overrides for Notes created by \fBsaptune note
 customise NOTEID\fP
+.br
+.RE
+.ll
+.sp
+\fI/run/modprobe.d/80\-saptune.conf\fP
+.RS 3
+.ll -.6i
+.sp
+Transient modprobe configuration file managed by \fBsaptune\fP for non\-permanent \fB[kmod]\fP actions.
+.br
+.RE
+.ll
+.sp
+\fI/etc/modprobe.d/80\-saptune\-permanent.conf\fP
+.RS 3
+.ll -.6i
+.sp
+Permanent modprobe configuration file created by \fBsaptune\fP when \fB+permanent\fP is specified.
 .br
 .RE
 .ll
