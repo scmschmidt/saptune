@@ -19,10 +19,13 @@ const (
 	KmodPermanentHeader = "# This file was created by saptune as permanent drop-in. Do not touch!"
 )
 
-// SysfsModuleDir and modprobeCmd are package variables so unit tests can override them.
+// SysfsModuleDir and ModprobeCmd are package variables so unit tests can override them.
 var (
-	SysfsModuleDir = "/sys/module"
-	modprobeCmd    = "/usr/sbin/modprobe"
+	SysfsModuleDir          = "/sys/module"
+	ModprobeCmd             = "/usr/sbin/modprobe"
+	modprobeCmd             = ModprobeCmd
+	KmodTransientDropInPath = KmodTransientDropIn
+	KmodPermanentDropInPath = KmodPermanentDropIn
 )
 
 // NormalizeModuleName normalises '-' to '_' for /sys/module lookups.
@@ -107,29 +110,29 @@ func ModprobeLoad(module string, params map[string]string) error {
 			args = append(args, fmt.Sprintf("%s=%s", k, params[k]))
 		}
 	}
-	DebugLog("ModprobeLoad: executing %s %v", modprobeCmd, args)
-	out, err := exec.Command(modprobeCmd, args...).CombinedOutput()
+	DebugLog("ModprobeLoad: executing %s %v", ModprobeCmd, args)
+	out, err := exec.Command(ModprobeCmd, args...).CombinedOutput()
 	if err != nil {
-		return ErrorLog("ModprobeLoad: %s %v failed (%v) - %s", modprobeCmd, args, err, strings.TrimSpace(string(out)))
+		return ErrorLog("ModprobeLoad: %s %v failed (%v) - %s", ModprobeCmd, args, err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
 
 // ModprobeRemove executes modprobe -r to unload a module.
 func ModprobeRemove(module string) error {
-	DebugLog("ModprobeRemove: executing %s -r %s", modprobeCmd, module)
-	out, err := exec.Command(modprobeCmd, "-r", module).CombinedOutput()
+	DebugLog("ModprobeRemove: executing %s -r %s", ModprobeCmd, module)
+	out, err := exec.Command(ModprobeCmd, "-r", module).CombinedOutput()
 	if err != nil {
-		return ErrorLog("ModprobeRemove: %s -r %s failed (%v) - %s", modprobeCmd, module, err, strings.TrimSpace(string(out)))
+		return ErrorLog("ModprobeRemove: %s -r %s failed (%v) - %s", ModprobeCmd, module, err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
 
 // ModprobeConfig runs modprobe -c and returns the effective configuration output.
 func ModprobeConfig() (string, error) {
-	out, err := exec.Command(modprobeCmd, "-c").CombinedOutput()
+	out, err := exec.Command(ModprobeCmd, "-c").CombinedOutput()
 	if err != nil {
-		return "", ErrorLog("ModprobeConfig: %s -c failed (%v) - %s", modprobeCmd, err, strings.TrimSpace(string(out)))
+		return "", ErrorLog("ModprobeConfig: %s -c failed (%v) - %s", ModprobeCmd, err, strings.TrimSpace(string(out)))
 	}
 	return string(out), nil
 }
@@ -217,6 +220,21 @@ func WriteDropInFileAtomic(filePath, header string, lines []string) error {
 	return nil
 }
 
+// FileHasSaptuneHeader checks if the first non-empty line of filePath matches expectedHeader.
+func FileHasSaptuneHeader(filePath, expectedHeader string) bool {
+	lines, err := ReadDropInFile(filePath)
+	if err != nil || len(lines) == 0 {
+		return false
+	}
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" {
+			return trimmed == expectedHeader
+		}
+	}
+	return false
+}
+
 // isKmodManagedLine reports whether line is an exact blacklist or install /bin/false line for module.
 func isKmodManagedLine(line, module string) bool {
 	trimmed := strings.TrimSpace(line)
@@ -275,7 +293,7 @@ func GetDropInModuleState(transientPath, permanentPath, module string) string {
 	}
 
 	if st := checkFile(permanentPath); st != "" {
-		return st
+		return st + "+permanent"
 	}
 	if st := checkFile(transientPath); st != "" {
 		return st
@@ -293,4 +311,143 @@ func IsEffectiveConfigEntry(configOutput, targetLine string) bool {
 		}
 	}
 	return false
+}
+
+// ModprobeDirectories lists the modprobe.d search directories in order of precedence.
+var ModprobeDirectories = []string{
+	"/etc/modprobe.d",
+	"/run/modprobe.d",
+	"/usr/local/lib/modprobe.d",
+	"/usr/lib/modprobe.d",
+	"/lib/modprobe.d",
+}
+
+// FileContainsModule reports whether filePath contains any configuration entry for module.
+func FileContainsModule(filePath, module string) bool {
+	lines, err := ReadDropInFile(filePath)
+	if err != nil {
+		return false
+	}
+	norm := NormalizeModuleName(module)
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		fields := strings.Fields(trimmed)
+		if len(fields) >= 2 && NormalizeModuleName(fields[1]) == norm {
+			return true
+		}
+	}
+	return false
+}
+
+// CheckModuleDropInShadowing inspects ModprobeDirectories for files that shadow
+// or are shadowed by saptune's drop-in configuration files for a specific module.
+// If module is empty, checks for any file existence.
+// Returns:
+//
+//	shadowedByHigher: true if a higher-priority directory contains 80-saptune.conf with an entry for module (ERROR)
+//	shadowsLower: true if a lower-priority directory contains 80-saptune.conf or 80-saptune-permanent.conf with an entry for module (WARNING)
+func CheckModuleDropInShadowing(module string) (shadowedByHigher bool, shadowsLower bool) {
+	transName := path.Base(KmodTransientDropInPath)
+	permName := path.Base(KmodPermanentDropInPath)
+
+	transDir := path.Dir(KmodTransientDropInPath)
+	permDir := path.Dir(KmodPermanentDropInPath)
+
+	// Check transient:
+	foundTransDir := false
+	for _, dir := range ModprobeDirectories {
+		if dir == transDir {
+			foundTransDir = true
+			continue
+		}
+		fPath := path.Join(dir, transName)
+		if st, err := os.Stat(fPath); err == nil && !st.IsDir() {
+			if module == "" || FileContainsModule(fPath, module) {
+				if !foundTransDir {
+					// Higher directory shadows saptune!
+					ErrorLog("kmod: module '%s': '%s' shadows saptune transient configuration in '%s'", module, fPath, transDir)
+					shadowedByHigher = true
+				} else {
+					// Lower directory is shadowed by saptune
+					WarningLog("kmod: module '%s': '%s' is shadowed by saptune transient configuration in '%s'", module, fPath, transDir)
+					shadowsLower = true
+				}
+			}
+		}
+	}
+
+	// Check permanent:
+	foundPermDir := false
+	for _, dir := range ModprobeDirectories {
+		if dir == permDir {
+			foundPermDir = true
+			continue
+		}
+		fPath := path.Join(dir, permName)
+		if st, err := os.Stat(fPath); err == nil && !st.IsDir() {
+			if module == "" || FileContainsModule(fPath, module) {
+				if !foundPermDir {
+					ErrorLog("kmod: module '%s': '%s' shadows saptune permanent configuration in '%s'", module, fPath, permDir)
+					shadowedByHigher = true
+				} else {
+					WarningLog("kmod: module '%s': '%s' is shadowed by saptune permanent configuration in '%s'", module, fPath, permDir)
+					shadowsLower = true
+				}
+			}
+		}
+	}
+
+	return shadowedByHigher, shadowsLower
+}
+
+// CheckDropInShadowing inspects ModprobeDirectories for files that shadow
+// or are shadowed by saptune's drop-in configuration files.
+func CheckDropInShadowing() (shadowedByHigher bool, shadowsLower bool) {
+	return CheckModuleDropInShadowing("")
+}
+
+// GetModuleInstallEntries returns all install entries found in configOutput for module.
+func GetModuleInstallEntries(configOutput, module string) []string {
+	norm := NormalizeModuleName(module)
+	var installLines []string
+	scanner := bufio.NewScanner(strings.NewReader(configOutput))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(line, "install ") {
+			fields := strings.Fields(line)
+			if len(fields) >= 2 {
+				entryMod := NormalizeModuleName(fields[1])
+				if entryMod == norm {
+					installLines = append(installLines, line)
+				}
+			}
+		}
+	}
+	return installLines
+}
+
+// CheckEffectiveInstallStatus checks modprobe -c for install entries for the specified module.
+// Returns:
+//
+//	effective: true if saptune's block entry (install <mod> /bin/false) is the active/winning entry (i.e. the FIRST install entry found)
+//	multiple: true if more than one install entry was found for this module
+//	winningEntry: the first install entry found for this module
+func CheckEffectiveInstallStatus(configOutput, module string) (effective bool, multiple bool, winningEntry string) {
+	installLines := GetModuleInstallEntries(configOutput, module)
+	if len(installLines) == 0 {
+		return false, false, ""
+	}
+
+	winningEntry = installLines[0]
+	fields := strings.Fields(winningEntry)
+	if len(fields) >= 3 && fields[2] == "/bin/false" {
+		effective = true
+	} else {
+		effective = false
+	}
+	multiple = len(installLines) > 1
+	return effective, multiple, winningEntry
 }

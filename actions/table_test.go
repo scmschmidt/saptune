@@ -7,6 +7,7 @@ import (
 	"github.com/SUSE/saptune/system"
 	"os"
 	"path"
+	"strings"
 	"testing"
 )
 
@@ -550,5 +551,289 @@ func TestColorPrint(t *testing.T) {
 	}
 	if cCompl != compliant {
 		t.Errorf("got: %+v, expected: %+v\n", cCompl, compliant)
+	}
+}
+
+func TestPrintNoteFieldsKmod(t *testing.T) {
+	os.Args = []string{"saptune", "note", "verify", "--colorscheme", "black", "--force", "--dryrun", "--help", "--version"}
+	system.RereadArgs()
+
+	cfgFile := fmt.Sprintf("%ssimpleNote.conf", ExtraFilesInGOPATH)
+	fcomp1 := note.FieldComparison{ReflectFieldName: "ConfFilePath", ReflectMapKey: "", ActualValue: cfgFile, ExpectedValue: cfgFile, ActualValueJS: cfgFile, ExpectedValueJS: cfgFile, MatchExpectation: true}
+	fcomp2 := note.FieldComparison{ReflectFieldName: "ID", ReflectMapKey: "", ActualValue: "testkmod", ExpectedValue: "testkmod", ActualValueJS: "testkmod", ExpectedValueJS: "testkmod", MatchExpectation: true}
+	fcompXen := note.FieldComparison{
+		ReflectFieldName: "SysctlParams",
+		ReflectMapKey:    "kmod:xen",
+		ActualValue:      "none|unloaded",
+		ExpectedValue:    "blacklist",
+		ActualValueJS:    "none|unloaded",
+		ExpectedValueJS:  "blacklist|unloaded",
+		MatchExpectation: false,
+	}
+	fcompVfat := note.FieldComparison{
+		ReflectFieldName: "SysctlParams",
+		ReflectMapKey:    "kmod:vfat",
+		ActualValue:      "block|unloaded",
+		ExpectedValue:    "block",
+		ActualValueJS:    "block|unloaded",
+		ExpectedValueJS:  "block|unloaded",
+		MatchExpectation: true,
+	}
+	fcompFloppy := note.FieldComparison{
+		ReflectFieldName: "SysctlParams",
+		ReflectMapKey:    "kmod:floppy",
+		ActualValue:      "blacklist+permanent|unloaded",
+		ExpectedValue:    "blacklist+permanent",
+		ActualValueJS:    "blacklist+permanent|unloaded",
+		ExpectedValueJS:  "blacklist+permanent|unloaded",
+		MatchExpectation: true,
+	}
+	fcompFloppyInform := note.FieldComparison{
+		ReflectFieldName: "Inform",
+		ReflectMapKey:    "kmod:floppy",
+		ActualValue:      "",
+		ExpectedValue:    "permanent",
+		ActualValueJS:    "",
+		ExpectedValueJS:  "permanent",
+		MatchExpectation: true,
+	}
+	fcompInvalid := note.FieldComparison{
+		ReflectFieldName: "SysctlParams",
+		ReflectMapKey:    "kmod:mod1",
+		ActualValue:      "",
+		ExpectedValue:    "NA",
+		ActualValueJS:    "",
+		ExpectedValueJS:  "NA",
+		MatchExpectation: false,
+	}
+	fcompInvalidInform := note.FieldComparison{
+		ReflectFieldName: "Inform",
+		ReflectMapKey:    "kmod:mod1",
+		ActualValue:      "",
+		ExpectedValue:    "invalid",
+		ActualValueJS:    "",
+		ExpectedValueJS:  "invalid",
+		MatchExpectation: true,
+	}
+	fcompDummy := note.FieldComparison{
+		ReflectFieldName: "SysctlParams",
+		ReflectMapKey:    "kmod:dummy",
+		ActualValue:      "blacklist|loaded:{}",
+		ExpectedValue:    "blacklist",
+		ActualValueJS:    "blacklist|loaded:{}",
+		ExpectedValueJS:  "blacklist|loaded:{}",
+		MatchExpectation: true,
+	}
+	fcompDummyInform := note.FieldComparison{
+		ReflectFieldName: "Inform",
+		ReflectMapKey:    "kmod:dummy",
+		ActualValue:      "",
+		ExpectedValue:    "loaded_on_apply",
+		ActualValueJS:    "",
+		ExpectedValueJS:  "loaded_on_apply",
+		MatchExpectation: true,
+	}
+	fcompPrintk := note.FieldComparison{
+		ReflectFieldName: "SysctlParams",
+		ReflectMapKey:    "kmod:printk",
+		ActualValue:      "PNA",
+		ExpectedValue:    "PNA",
+		ActualValueJS:    "PNA",
+		ExpectedValueJS:  "PNA",
+		MatchExpectation: false,
+	}
+	fcompPrintkInform := note.FieldComparison{
+		ReflectFieldName: "Inform",
+		ReflectMapKey:    "kmod:printk",
+		ActualValue:      "",
+		ExpectedValue:    "builtin",
+		ActualValueJS:    "",
+		ExpectedValueJS:  "builtin",
+		MatchExpectation: true,
+	}
+
+	mapTest := map[string]note.FieldComparison{
+		"ConfFilePath":              fcomp1,
+		"ID":                        fcomp2,
+		"SysctlParams[kmod:xen]":    fcompXen,
+		"SysctlParams[kmod:vfat]":   fcompVfat,
+		"SysctlParams[kmod:floppy]": fcompFloppy,
+		"Inform[kmod:floppy]":       fcompFloppyInform,
+		"SysctlParams[kmod:mod1]":   fcompInvalid,
+		"Inform[kmod:mod1]":         fcompInvalidInform,
+		"SysctlParams[kmod:dummy]":  fcompDummy,
+		"Inform[kmod:dummy]":        fcompDummyInform,
+		"SysctlParams[kmod:printk]": fcompPrintk,
+		"Inform[kmod:printk]":       fcompPrintkInform,
+	}
+	noteComp := map[string]map[string]note.FieldComparison{"testkmod": mapTest}
+
+	buffer := bytes.Buffer{}
+	result := system.JPNotes{}
+	PrintNoteFields(&buffer, "NONE", noteComp, true, &result)
+	output := buffer.String()
+
+	if !strings.Contains(output, "[20] after a permanent entry, re-create the initrd if the module is still loaded after a reboot") {
+		t.Errorf("output should contain footnote [20]: %s", output)
+	}
+	if !strings.Contains(output, "[21] due to an invalid entry, the module config was not done during apply") {
+		t.Errorf("output should contain footnote [21]: %s", output)
+	}
+	if !strings.Contains(output, "[22] module is compiled into the kernel, setting not possible") {
+		t.Errorf("output should contain footnote [22]: %s", output)
+	}
+
+	if strings.Contains(output, "blacklist|unloaded") {
+		t.Errorf("output should not contain 'blacklist|unloaded' in Expected column: %s", output)
+	}
+	if strings.Contains(output, "block|unloaded") && !strings.Contains(output, "block |") {
+		// block|unloaded must not appear in Expected column
+		lines := strings.Split(output, "\n")
+		for _, line := range lines {
+			if strings.Contains(line, "kmod:vfat") {
+				fields := strings.Split(line, " | ")
+				if len(fields) >= 5 {
+					expField := strings.TrimSpace(fields[2])
+					actField := strings.TrimSpace(fields[4])
+					if expField != "block" {
+						t.Errorf("expected 'block' in Expected column for kmod:vfat, got '%s'", expField)
+					}
+					if actField != "block|unloaded" {
+						t.Errorf("expected 'block|unloaded' in Actual column for kmod:vfat, got '%s'", actField)
+					}
+				}
+			}
+			if strings.Contains(line, "kmod:xen") {
+				fields := strings.Split(line, " | ")
+				if len(fields) >= 5 {
+					expField := strings.TrimSpace(fields[2])
+					actField := strings.TrimSpace(fields[4])
+					if expField != "blacklist" {
+						t.Errorf("expected 'blacklist' in Expected column for kmod:xen, got '%s'", expField)
+					}
+					if actField != "none|unloaded" {
+						t.Errorf("expected 'none|unloaded' in Actual column for kmod:xen, got '%s'", actField)
+					}
+				}
+			}
+			if strings.Contains(line, "kmod:floppy") {
+				fields := strings.Split(line, " | ")
+				if len(fields) >= 5 {
+					expField := strings.TrimSpace(fields[2])
+					actField := strings.TrimSpace(fields[4])
+					if expField != "blacklist+permanent" {
+						t.Errorf("expected 'blacklist+permanent' in Expected column for kmod:floppy, got '%s'", expField)
+					}
+					if actField != "blacklist+permanent|unloaded" {
+						t.Errorf("expected 'blacklist+permanent|unloaded' in Actual column for kmod:floppy, got '%s'", actField)
+					}
+				}
+			}
+			if strings.Contains(line, "kmod:dummy") {
+				fields := strings.Split(line, " | ")
+				if len(fields) >= 6 {
+					expField := strings.TrimSpace(fields[2])
+					actField := strings.TrimSpace(fields[4])
+					complField := strings.TrimSpace(fields[5])
+					if expField != "blacklist" {
+						t.Errorf("expected 'blacklist' in Expected column for kmod:dummy, got '%s'", expField)
+					}
+					if actField != "blacklist|loaded" {
+						t.Errorf("expected 'blacklist|loaded' in Actual column for kmod:dummy, got '%s'", actField)
+					}
+					if !strings.Contains(complField, "yes") || !strings.Contains(complField, "[19]") {
+						t.Errorf("expected 'yes [19]' in Compliant column for kmod:dummy, got '%s'", complField)
+					}
+				}
+			}
+			if strings.Contains(line, "kmod:mod1") {
+				fields := strings.Split(line, " | ")
+				if len(fields) >= 6 {
+					expField := strings.TrimSpace(fields[2])
+					actField := strings.TrimSpace(fields[4])
+					complField := strings.TrimSpace(fields[5])
+					if expField != "NA" {
+						t.Errorf("expected 'NA' in Expected column for kmod:mod1, got '%s'", expField)
+					}
+					if actField != "" {
+						t.Errorf("expected '' (empty) in Actual column for kmod:mod1, got '%s'", actField)
+					}
+					if !strings.Contains(complField, "no") || !strings.Contains(complField, "[21]") {
+						t.Errorf("expected 'no [21]' in Compliant column for kmod:mod1, got '%s'", complField)
+					}
+				}
+			}
+			if strings.Contains(line, "kmod:printk") {
+				fields := strings.Split(line, " | ")
+				if len(fields) >= 6 {
+					expField := strings.TrimSpace(fields[2])
+					actField := strings.TrimSpace(fields[4])
+					complField := strings.TrimSpace(fields[5])
+					if expField != "PNA" {
+						t.Errorf("expected 'PNA' in Expected column for kmod:printk, got '%s'", expField)
+					}
+					if actField != "NA" {
+						t.Errorf("expected 'NA' in Actual column for kmod:printk, got '%s'", actField)
+					}
+					if !strings.Contains(complField, "no") || !strings.Contains(complField, "[22]") {
+						t.Errorf("expected 'no [22]' in Compliant column for kmod:printk, got '%s'", complField)
+					}
+					if strings.Contains(complField, "[16]") || strings.Contains(complField, "[20]") {
+						t.Errorf("expected [16] and [20] suppressed in Compliant column for kmod:printk, got '%s'", complField)
+					}
+				}
+			}
+		}
+	}
+
+	for _, vl := range result.Verifications {
+		if vl.Parameter == "kmod:xen" {
+			if vl.ExpValue != "blacklist" {
+				t.Errorf("MRO ExpValue for kmod:xen: got '%s', want 'blacklist'", vl.ExpValue)
+			}
+			if vl.ActValue == nil || *vl.ActValue != "none|unloaded" {
+				t.Errorf("MRO ActValue for kmod:xen: got '%v', want 'none|unloaded'", vl.ActValue)
+			}
+		}
+		if vl.Parameter == "kmod:vfat" {
+			if vl.ExpValue != "block" {
+				t.Errorf("MRO ExpValue for kmod:vfat: got '%s', want 'block'", vl.ExpValue)
+			}
+			if vl.ActValue == nil || *vl.ActValue != "block|unloaded" {
+				t.Errorf("MRO ActValue for kmod:vfat: got '%v', want 'block|unloaded'", vl.ActValue)
+			}
+		}
+		if vl.Parameter == "kmod:floppy" {
+			if vl.ExpValue != "blacklist+permanent" {
+				t.Errorf("MRO ExpValue for kmod:floppy: got '%s', want 'blacklist+permanent'", vl.ExpValue)
+			}
+			if vl.ActValue == nil || *vl.ActValue != "blacklist+permanent|unloaded" {
+				t.Errorf("MRO ActValue for kmod:floppy: got '%v', want 'blacklist+permanent|unloaded'", vl.ActValue)
+			}
+		}
+		if vl.Parameter == "kmod:dummy" {
+			if vl.ExpValue != "blacklist" {
+				t.Errorf("MRO ExpValue for kmod:dummy: got '%s', want 'blacklist'", vl.ExpValue)
+			}
+			if vl.ActValue == nil || *vl.ActValue != "blacklist|loaded" {
+				t.Errorf("MRO ActValue for kmod:dummy: got '%v', want 'blacklist|loaded'", vl.ActValue)
+			}
+		}
+		if vl.Parameter == "kmod:mod1" {
+			if vl.ExpValue != "NA" {
+				t.Errorf("MRO ExpValue for kmod:mod1: got '%s', want 'NA'", vl.ExpValue)
+			}
+			if vl.ActValue == nil || *vl.ActValue != "" {
+				t.Errorf("MRO ActValue for kmod:mod1: got '%v', want ''", vl.ActValue)
+			}
+		}
+		if vl.Parameter == "kmod:printk" {
+			if vl.ExpValue != "PNA" {
+				t.Errorf("MRO ExpValue for kmod:printk: got '%s', want 'PNA'", vl.ExpValue)
+			}
+			if vl.ActValue != nil {
+				t.Errorf("MRO ActValue for kmod:printk: got '%v', want nil", *vl.ActValue)
+			}
+		}
 	}
 }

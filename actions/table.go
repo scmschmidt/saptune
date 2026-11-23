@@ -37,7 +37,7 @@ func PrintNoteFields(writer io.Writer, header string, noteComparisons map[string
 
 	var compliant string
 	var comment string
-	var footnote []string = make([]string, 20)
+	var footnote []string = make([]string, 24)
 
 	colorScheme := getColorScheme()
 	// sort output
@@ -89,6 +89,20 @@ func PrintNoteFields(writer io.Writer, header string, noteComparisons map[string
 		// in the table
 		if comparison.ReflectMapKey == "force_latency" {
 			pAct, pExp = system.FlTblEntry(pAct, pExp)
+		}
+		if strings.HasPrefix(comparison.ReflectMapKey, "kmod:") {
+			if comparison.ExpectedValueJS == "NA" {
+				pAct = ""
+			} else {
+				if strings.HasPrefix(pExp, "blacklist") || strings.HasPrefix(pExp, "block") {
+					parts := strings.SplitN(pExp, "|", 2)
+					pExp = parts[0]
+				}
+				if strings.Contains(pAct, "|loaded:") {
+					parts := strings.SplitN(pAct, "|loaded:", 2)
+					pAct = parts[0] + "|loaded"
+				}
+			}
 		}
 		noteLine.ActValue = &pAct
 
@@ -380,11 +394,27 @@ func setWidthOfColums(compare note.FieldComparison, c1, c2, c3, c4 int) (int, in
 		if len(compare.ReflectMapKey) > c2 {
 			c2 = len(compare.ReflectMapKey)
 		}
-		if len(compare.ExpectedValueJS) > c3 {
-			c3 = len(compare.ExpectedValueJS)
+		expVal := compare.ExpectedValueJS
+		if strings.HasPrefix(compare.ReflectMapKey, "kmod:") {
+			if strings.HasPrefix(expVal, "blacklist") || strings.HasPrefix(expVal, "block") {
+				parts := strings.SplitN(expVal, "|", 2)
+				expVal = parts[0]
+			}
 		}
-		if len(compare.ActualValueJS) > c4 {
-			c4 = len(compare.ActualValueJS)
+		if len(expVal) > c3 {
+			c3 = len(expVal)
+		}
+		actVal := compare.ActualValueJS
+		if strings.HasPrefix(compare.ReflectMapKey, "kmod:") {
+			if compare.ExpectedValueJS == "NA" {
+				actVal = ""
+			} else if strings.Contains(actVal, "|loaded:") {
+				parts := strings.SplitN(actVal, "|loaded:", 2)
+				actVal = parts[0] + "|loaded"
+			}
+		}
+		if len(actVal) > c4 {
+			c4 = len(actVal)
 		}
 	}
 	c1, c3, c4 = chkMaxWidthOfColums([]int{c1, c3, c4})

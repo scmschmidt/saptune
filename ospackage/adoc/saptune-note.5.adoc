@@ -434,6 +434,10 @@ Footnotes used during *verify*:
 * *[18]* another modprobe configuration entry takes precedence over the saptune entry.
 * *[19]* the module was already loaded when the entry was applied; blocking or blacklisting does not unload it.
 * *[20]* after a permanent entry, re-create the initrd if the module is still loaded after a reboot.
+* *[21]* due to an invalid entry, the module config was not done during apply.
+* *[22]* module is compiled into the kernel, setting not possible.
+* *[23]* multiple install entries found, saptune entry takes precedence.
+* *[24]* saptune drop-in shadows a file of the same name in a lower precedence directory.
 --
 +
 *[login]*::

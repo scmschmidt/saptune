@@ -34,6 +34,10 @@ const (
 	footnote18   = "[18] another modprobe configuration entry takes precedence over the saptune entry"
 	footnote19   = "[19] the module was already loaded when the entry was applied; blocking or blacklisting does not unload it"
 	footnote20   = "[20] after a permanent entry, re-create the initrd if the module is still loaded after a reboot"
+	footnote21   = "[21] due to an invalid entry, the module config was not done during apply"
+	footnote22   = "[22] module is compiled into the kernel, setting not possible"
+	footnote23   = "[23] multiple install entries found, saptune entry takes precedence"
+	footnote24   = "[24] saptune drop-in shadows a file of the same name in a lower precedence directory"
 )
 
 // set 'unsupported' footnote regarding the architecture
@@ -62,7 +66,7 @@ func prepFN(comparison note.FieldComparison, compliant, inform string) bool {
 		if strings.Contains(comparison.ReflectMapKey, "xfsopt_") {
 			prep = true
 		}
-		if strings.HasPrefix(comparison.ReflectMapKey, "kmod:") && (strings.Contains(inform, "masked") || strings.Contains(inform, "loaded_on_apply")) {
+		if strings.HasPrefix(comparison.ReflectMapKey, "kmod:") && (strings.Contains(inform, "masked") || strings.Contains(inform, "invalid") || strings.Contains(inform, "builtin")) {
 			prep = true
 		}
 	}
@@ -85,8 +89,10 @@ func prepareFootnote(comparison note.FieldComparison, compliant, comment, inform
 	if system.GetCSP() == "aws" {
 		footnote1 = footnote1AWS
 	}
-	// set footnote for unsupported or not available parameter [1],[2]
-	compliant, comment, footnote = setUsNa(comparison.ActualValue.(string), compliant, comment, footnote)
+	// set footnote for unsupported or not available parameter [1],[2],[16]
+	if !strings.HasPrefix(comparison.ReflectMapKey, "kmod:") {
+		compliant, comment, footnote = setUsNa(comparison.ActualValue.(string), compliant, comment, footnote)
+	}
 	// set footnote for rpm or grub parameter [3],[6]
 	compliant, comment, footnote = setRpmGrub(comparison, compliant, comment, footnote)
 	// set footnote for diffs in force_latency parameter [4]
@@ -305,6 +311,16 @@ func setMem(mapKey, compliant, comment string, footnote []string) (string, strin
 	return compliant, comment, footnote
 }
 
+func appendFootnoteTag(str, tag string) string {
+	if strings.Contains(str, tag) {
+		return str
+	}
+	if str == "" {
+		return tag
+	}
+	return str + " " + tag
+}
+
 // setKmodFootnotes sets footnotes [18], [19], [20] for kernel module entries
 func setKmodFootnotes(comparison note.FieldComparison, compliant, comment, inform string, footnote []string) (string, string, []string) {
 	if !strings.HasPrefix(comparison.ReflectMapKey, "kmod:") || inform == "" {
@@ -318,25 +334,49 @@ func setKmodFootnotes(comparison note.FieldComparison, compliant, comment, infor
 			if strings.Contains(compliant, "yes") {
 				compliant = strings.Replace(compliant, "yes", "no ", 1)
 			}
-			compliant = compliant + " [18]"
-			comment = comment + " [18]"
+			compliant = appendFootnoteTag(compliant, "[18]")
+			comment = appendFootnoteTag(comment, "[18]")
 			if len(footnote) > 17 {
 				footnote[17] = footnote18
 			}
 		case "loaded_on_apply":
-			if strings.Contains(compliant, "yes") {
-				compliant = strings.Replace(compliant, "yes", "no ", 1)
-			}
-			compliant = compliant + " [19]"
-			comment = comment + " [19]"
+			compliant = appendFootnoteTag(compliant, "[19]")
+			comment = appendFootnoteTag(comment, "[19]")
 			if len(footnote) > 18 {
 				footnote[18] = footnote19
 			}
 		case "permanent":
-			compliant = compliant + " [20]"
-			comment = comment + " [20]"
+			compliant = appendFootnoteTag(compliant, "[20]")
+			comment = appendFootnoteTag(comment, "[20]")
 			if len(footnote) > 19 {
 				footnote[19] = footnote20
+			}
+		case "invalid":
+			compliant = appendFootnoteTag(compliant, "[21]")
+			comment = appendFootnoteTag(comment, "[21]")
+			if len(footnote) > 20 {
+				footnote[20] = footnote21
+			}
+		case "builtin":
+			if strings.Contains(compliant, "yes") {
+				compliant = strings.Replace(compliant, "yes", "no ", 1)
+			}
+			compliant = appendFootnoteTag(compliant, "[22]")
+			comment = appendFootnoteTag(comment, "[22]")
+			if len(footnote) > 21 {
+				footnote[21] = footnote22
+			}
+		case "multiple_install":
+			compliant = appendFootnoteTag(compliant, "[23]")
+			comment = appendFootnoteTag(comment, "[23]")
+			if len(footnote) > 22 {
+				footnote[22] = footnote23
+			}
+		case "shadowing_warning":
+			compliant = appendFootnoteTag(compliant, "[24]")
+			comment = appendFootnoteTag(comment, "[24]")
+			if len(footnote) > 23 {
+				footnote[23] = footnote24
 			}
 		}
 	}

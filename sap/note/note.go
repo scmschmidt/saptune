@@ -217,7 +217,7 @@ func CompareNoteFields(actualNote, expectedNote Note, noteID, task string) (allM
 				} else if key.String() == "force_latency" && comparisons[ckey].ReflectFieldName == "SysctlParams" {
 					valApplyList = append(valApplyList, comparisons[ckey].ReflectMapKey)
 				}
-				if !comparisons[ckey].MatchExpectation && fieldName == "SysctlParams" {
+				if !comparisons[ckey].MatchExpectation && fieldName == "SysctlParams" && comparisons[ckey].ExpectedValueJS != "NA" {
 					// check for conflicting parameter settings
 					comp := comparisons[ckey]
 					comp.MatchExpectation = ChkConflictingParams(noteID, key.String(), task, comp.MatchExpectation)
@@ -236,7 +236,7 @@ func CompareNoteFields(actualNote, expectedNote Note, noteID, task string) (allM
 					// if this should change in the future use
 					// !strings.Contains(key.String(), "grub")
 					// instead of !system.IsInternalGrub(key.String())
-					if actualValue.(string) != "all:none" && !system.IsInternalGrub(key.String()) && !(system.IsXFSOption.MatchString(key.String()) && actualValue.(string) == "NA") && actualValue.(string) != "PNA" && key.String() != "VSZ_TMPFS_PERCENT" {
+					if actualValue.(string) != "all:none" && !system.IsInternalGrub(key.String()) && !(system.IsXFSOption.MatchString(key.String()) && actualValue.(string) == "NA") && (actualValue.(string) != "PNA" || comparisons[ckey].ExpectedValueJS == "NA" || strings.HasPrefix(key.String(), "kmod:")) && key.String() != "VSZ_TMPFS_PERCENT" {
 						allMatch = false
 					}
 				}
@@ -253,6 +253,29 @@ func CompareNoteFields(actualNote, expectedNote Note, noteID, task string) (allM
 	if allMatch && grubAvail {
 		allMatch = chkGrubCompliance(comparisons, allMatch)
 	}
+
+	// Check kmod compliance: if a kmod entry is masked (overruled or shadowed by another modprobe entry),
+	// mark it non-compliant (allMatch = false, MatchExpectation = false) unless superseded by another note.
+	for k, comp := range comparisons {
+		if strings.HasPrefix(k, "SysctlParams[kmod:") {
+			paramKey := comp.ReflectMapKey
+			lastNote := ParameterLastNote(paramKey)
+			if lastNote != "" && lastNote != "start" && lastNote != noteID {
+				// Superseded by a later Note (Footnote 17); does not fail compliance
+				continue
+			}
+			infKey := fmt.Sprintf("Inform[%s]", paramKey)
+			if infComp, ok := comparisons[infKey]; ok {
+				infVal, _ := infComp.ExpectedValue.(string)
+				if strings.Contains(infVal, "masked") {
+					comp.MatchExpectation = false
+					comparisons[k] = comp
+					allMatch = false
+				}
+			}
+		}
+	}
+
 	return
 }
 
@@ -308,6 +331,22 @@ func cmpMapValue(fieldName string, key reflect.Value, actVal, expVal interface{}
 	}
 	if strings.Split(key.String(), ":")[0] == "systemd" {
 		match = system.CmpServiceStates(actVal.(string), expVal.(string))
+	}
+	if strings.Split(key.String(), ":")[0] == "kmod" {
+		if expectedValueJS == "NA" {
+			actualValueJS = ""
+			actVal = ""
+			match = false
+		} else if actualValueJS == "PNA" || expectedValueJS == "PNA" {
+			match = false
+		} else if strings.HasPrefix(expectedValueJS, "blacklist") || strings.HasPrefix(expectedValueJS, "block") {
+			parts := strings.SplitN(expectedValueJS, "|", 2)
+			expectedValueJS = parts[0]
+			if s, ok := expVal.(string); ok {
+				expParts := strings.SplitN(s, "|", 2)
+				expVal = expParts[0]
+			}
+		}
 	}
 	if expVal == "" {
 		// if the expected value is empty, the parameter value will

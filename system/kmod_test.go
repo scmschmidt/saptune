@@ -252,8 +252,8 @@ func TestDropInModuleStateAndPrecedence(t *testing.T) {
 
 	// Permanent file has block for xen (permanent takes precedence)
 	_ = WriteDropInFileAtomic(permPath, KmodPermanentHeader, []string{"install xen /bin/false"})
-	if st := GetDropInModuleState(transPath, permPath, "xen"); st != "block" {
-		t.Errorf("expected 'block', got %s", st)
+	if st := GetDropInModuleState(transPath, permPath, "xen"); st != "block+permanent" {
+		t.Errorf("expected 'block+permanent', got %s", st)
 	}
 }
 
@@ -286,5 +286,103 @@ func TestForeignLinesUntouched(t *testing.T) {
 	}
 	if !hasCustom {
 		t.Errorf("expected foreign line 'options mymod foo=bar' to be preserved")
+	}
+}
+
+func TestCheckDropInShadowing(t *testing.T) {
+	origDirs := ModprobeDirectories
+	origTrans := KmodTransientDropInPath
+	origPerm := KmodPermanentDropInPath
+	defer func() {
+		ModprobeDirectories = origDirs
+		KmodTransientDropInPath = origTrans
+		KmodPermanentDropInPath = origPerm
+	}()
+
+	tmpDir := t.TempDir()
+	etcDir := path.Join(tmpDir, "etc", "modprobe.d")
+	runDir := path.Join(tmpDir, "run", "modprobe.d")
+	usrDir := path.Join(tmpDir, "usr", "lib", "modprobe.d")
+	_ = os.MkdirAll(etcDir, 0755)
+	_ = os.MkdirAll(runDir, 0755)
+	_ = os.MkdirAll(usrDir, 0755)
+
+	ModprobeDirectories = []string{etcDir, runDir, usrDir}
+	KmodTransientDropInPath = path.Join(runDir, "80-saptune.conf")
+	KmodPermanentDropInPath = path.Join(etcDir, "80-saptune-permanent.conf")
+
+	// 1. Clean state: no files
+	shadowed, shadowsLower := CheckDropInShadowing()
+	if shadowed || shadowsLower {
+		t.Errorf("expected no shadowing in clean state, got shadowed=%v, shadowsLower=%v", shadowed, shadowsLower)
+	}
+
+	// 2. 80-saptune.conf in /etc/ shadows /run/ (ERROR)
+	_ = os.WriteFile(path.Join(etcDir, "80-saptune.conf"), []byte("# custom"), 0644)
+	shadowed, shadowsLower = CheckDropInShadowing()
+	if !shadowed {
+		t.Errorf("expected shadowedByHigher = true when /etc/ has 80-saptune.conf")
+	}
+
+	// 3. 80-saptune.conf in /usr/lib/ is shadowed by /run/ (WARNING)
+	_ = os.Remove(path.Join(etcDir, "80-saptune.conf"))
+	_ = os.WriteFile(path.Join(usrDir, "80-saptune.conf"), []byte("# distro"), 0644)
+	shadowed, shadowsLower = CheckDropInShadowing()
+	if shadowed {
+		t.Errorf("expected shadowedByHigher = false")
+	}
+	if !shadowsLower {
+		t.Errorf("expected shadowsLower = true when /usr/lib/ has 80-saptune.conf")
+	}
+
+	// 4. 80-saptune-permanent.conf in /run/ is shadowed by /etc/ (WARNING)
+	_ = os.Remove(path.Join(usrDir, "80-saptune.conf"))
+	_ = os.WriteFile(path.Join(runDir, "80-saptune-permanent.conf"), []byte("# stray"), 0644)
+	shadowed, shadowsLower = CheckDropInShadowing()
+	if shadowed {
+		t.Errorf("expected shadowedByHigher = false")
+	}
+	if !shadowsLower {
+		t.Errorf("expected shadowsLower = true when /run/ has 80-saptune-permanent.conf")
+	}
+}
+
+func TestCheckEffectiveInstallStatus(t *testing.T) {
+	// Case 1: Saptune is the only install entry
+	cfg1 := `
+alias testmod1 realmod
+install mymod /bin/false
+options mymod debug=1
+`
+	eff, mult, win := CheckEffectiveInstallStatus(cfg1, "mymod")
+	if !eff || mult || win != "install mymod /bin/false" {
+		t.Errorf("case 1 failed: eff=%v, mult=%v, win=%s", eff, mult, win)
+	}
+
+	// Case 2: Saptune is FIRST, but another install entry follows (WARNING)
+	cfg2 := `
+install mymod /bin/false
+install mymod /bin/true
+`
+	eff, mult, win = CheckEffectiveInstallStatus(cfg2, "mymod")
+	if !eff || !mult || win != "install mymod /bin/false" {
+		t.Errorf("case 2 failed: eff=%v, mult=%v, win=%s", eff, mult, win)
+	}
+
+	// Case 3: Another install entry is FIRST, overruling Saptune (ERROR)
+	cfg3 := `
+install mymod /bin/true
+install mymod /bin/false
+`
+	eff, mult, win = CheckEffectiveInstallStatus(cfg3, "mymod")
+	if eff || !mult || win != "install mymod /bin/true" {
+		t.Errorf("case 3 failed: eff=%v, mult=%v, win=%s", eff, mult, win)
+	}
+
+	// Case 4: No install entry
+	cfg4 := `blacklist mymod`
+	eff, mult, win = CheckEffectiveInstallStatus(cfg4, "mymod")
+	if eff || mult || win != "" {
+		t.Errorf("case 4 failed: eff=%v, mult=%v, win=%s", eff, mult, win)
 	}
 }

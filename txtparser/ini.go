@@ -85,6 +85,19 @@ func splitLineIntoKOV(curSection, line string) []string {
 			return nil
 		}
 		kov = RegexKeyOperatorValue.FindStringSubmatch(line)
+		if curSection == "kmod" && len(param) > 1 {
+			fullKey := strings.TrimSpace(param[1])
+			if len(kov) > 1 {
+				kov[1] = fullKey
+			} else {
+				val := ""
+				parts := strings.SplitN(line, "=", 2)
+				if len(parts) == 2 {
+					val = strings.TrimSpace(parts[1])
+				}
+				kov = []string{line, fullKey, "=", val}
+			}
+		}
 		if curSection == "grub" || curSection == "sys" || curSection == "service" || curSection == "kmod" {
 			kov = splitSectLine(curSection, line, kov)
 		}

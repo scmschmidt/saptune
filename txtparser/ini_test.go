@@ -461,3 +461,30 @@ governor=performance
 		t.Errorf("expected cpu in AllValues")
 	}
 }
+
+func TestKmodLineSplitting(t *testing.T) {
+	cases := []struct {
+		line        string
+		expectedKey string
+		expectedVal string
+	}{
+		{"xen = blacklist", "kmod:xen", "blacklist"},
+		{"xen guest = blacklist", "kmod:xen guest", "blacklist"},
+		{"= blacklist", "kmod:", "blacklist"},
+		{"xen =", "kmod:xen", ""},
+		{"cifs = blacklist+keep", "kmod:cifs", "blacklist+keep"},
+	}
+
+	for _, c := range cases {
+		kov := splitLineIntoKOV("kmod", c.line)
+		if len(kov) < 4 {
+			t.Fatalf("splitLineIntoKOV('kmod', '%s') returned len %d, want >= 4", c.line, len(kov))
+		}
+		if kov[1] != c.expectedKey {
+			t.Errorf("splitLineIntoKOV('kmod', '%s') key: got '%s', want '%s'", c.line, kov[1], c.expectedKey)
+		}
+		if kov[3] != c.expectedVal {
+			t.Errorf("splitLineIntoKOV('kmod', '%s') val: got '%s', want '%s'", c.line, kov[3], c.expectedVal)
+		}
+	}
+}

@@ -2,7 +2,9 @@ package note
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/SUSE/saptune/system"
+	"os"
 	"strings"
 )
 
@@ -10,9 +12,9 @@ import (
 
 var (
 	// KmodDropInTransientPath is the transient modprobe drop-in location.
-	KmodDropInTransientPath = system.KmodTransientDropIn
+	KmodDropInTransientPath = system.KmodTransientDropInPath
 	// KmodDropInPermanentPath is the permanent modprobe drop-in location.
-	KmodDropInPermanentPath = system.KmodPermanentDropIn
+	KmodDropInPermanentPath = system.KmodPermanentDropInPath
 )
 
 // KmodEntry represents a parsed [kmod] configuration entry.
@@ -32,26 +34,53 @@ func cleanKmodModule(key string) (string, error) {
 		mod = strings.TrimPrefix(mod, "kmod:")
 	}
 	if mod == "" {
-		return "", system.ErrorLog("kmod: empty module name")
+		return "", fmt.Errorf("empty module name")
 	}
 	if strings.ContainsAny(mod, " \t\r\n") {
-		return "", system.ErrorLog("kmod: module name '%s' contains whitespace", mod)
+		return "", fmt.Errorf("module name '%s' contains whitespace", mod)
 	}
 	return mod, nil
 }
 
+// kmodEntryPrefix formats the logging prefix with Note name and entry if available.
+func kmodEntryPrefix(noteID, mod, value string) string {
+	valStr := strings.TrimSpace(value)
+	var entryStr string
+	if mod != "" && valStr != "" {
+		entryStr = fmt.Sprintf("'%s = %s'", mod, valStr)
+	} else if mod != "" {
+		entryStr = fmt.Sprintf("'%s ='", mod)
+	} else if valStr != "" {
+		entryStr = fmt.Sprintf("'= %s'", valStr)
+	}
+
+	if noteID != "" {
+		if entryStr != "" {
+			return fmt.Sprintf("kmod: Note '%s', entry %s", noteID, entryStr)
+		}
+		return fmt.Sprintf("kmod: Note '%s'", noteID)
+	}
+	if entryStr != "" {
+		return fmt.Sprintf("kmod: entry %s", entryStr)
+	}
+	return "kmod"
+}
+
 // parseKmodActionAndOptions splits action[+opt1+opt2] into action and option tokens.
-func parseKmodActionAndOptions(actToken string) (string, []string, error) {
+func parseKmodActionAndOptions(prefix, actToken string) (string, []string, error) {
 	if actToken == "" {
-		return "", nil, system.ErrorLog("kmod: empty action")
+		return "", nil, system.ErrorLog("%s: empty action", prefix)
 	}
 	parts := strings.Split(actToken, "+")
 	action := strings.ToLower(strings.TrimSpace(parts[0]))
+	if action == "" {
+		return "", nil, system.ErrorLog("%s: empty action", prefix)
+	}
 	var opts []string
 	for _, opt := range parts[1:] {
 		trimmed := strings.ToLower(strings.TrimSpace(opt))
 		if trimmed == "" {
-			return "", nil, system.ErrorLog("kmod: empty option in '%s'", actToken)
+			return "", nil, system.ErrorLog("%s: empty option in '%s'", prefix, actToken)
 		}
 		opts = append(opts, trimmed)
 	}
@@ -59,39 +88,39 @@ func parseKmodActionAndOptions(actToken string) (string, []string, error) {
 }
 
 // validateKmodActionAndOpts validates options for the given action according to spec.
-func validateKmodActionAndOpts(entry *KmodEntry, action string, opts []string) error {
+func validateKmodActionAndOpts(prefix string, entry *KmodEntry, action string, opts []string) error {
 	seen := make(map[string]bool)
 	for _, opt := range opts {
 		if seen[opt] {
-			return system.ErrorLog("kmod: repeated option '%s' for module '%s'", opt, entry.Module)
+			return system.ErrorLog("%s: repeated option '%s' for module '%s'", prefix, opt, entry.Module)
 		}
 		seen[opt] = true
 
 		switch opt {
 		case "permanent":
 			if action != "blacklist" && action != "block" {
-				return system.ErrorLog("kmod: option 'permanent' not allowed for action '%s'", action)
+				return system.ErrorLog("%s: option 'permanent' not allowed for action '%s'", prefix, action)
 			}
 			entry.Permanent = true
 		case "keep":
 			if action != "load" && action != "unload" {
-				return system.ErrorLog("kmod: option 'keep' not allowed for action '%s'", action)
+				return system.ErrorLog("%s: option 'keep' not allowed for action '%s'", prefix, action)
 			}
 			entry.Keep = true
 		case "no-reload":
 			if action != "load" {
-				return system.ErrorLog("kmod: option 'no-reload' not allowed for action '%s'", action)
+				return system.ErrorLog("%s: option 'no-reload' not allowed for action '%s'", prefix, action)
 			}
 			entry.NoReload = true
 		default:
-			return system.ErrorLog("kmod: unknown option '%s' for action '%s'", opt, action)
+			return system.ErrorLog("%s: unknown option '%s' for action '%s'", prefix, opt, action)
 		}
 	}
 	return nil
 }
 
 // parseKmodParams parses PARAM=VALUE tokens into a map.
-func parseKmodParams(tokens []string) (map[string]string, error) {
+func parseKmodParams(prefix string, tokens []string) (map[string]string, error) {
 	params := make(map[string]string)
 	for _, tok := range tokens {
 		p := strings.TrimSpace(tok)
@@ -100,7 +129,7 @@ func parseKmodParams(tokens []string) (map[string]string, error) {
 		}
 		eqIdx := strings.Index(p, "=")
 		if eqIdx <= 0 || eqIdx == len(p)-1 {
-			return nil, system.ErrorLog("kmod: invalid parameter pair '%s', expected PARAM=VALUE", p)
+			return nil, system.ErrorLog("%s: invalid parameter pair '%s', expected PARAM=VALUE", prefix, p)
 		}
 		k := strings.TrimSpace(p[:eqIdx])
 		v := strings.TrimSpace(p[eqIdx+1:])
@@ -111,18 +140,26 @@ func parseKmodParams(tokens []string) (map[string]string, error) {
 
 // ParseKmodEntry parses a MODULE = value line from the [kmod] section.
 // Load and unload actions are rejected for now until implemented.
-func ParseKmodEntry(key, value string) (*KmodEntry, error) {
-	mod, err := cleanKmodModule(key)
-	if err != nil {
-		return nil, err
+func ParseKmodEntry(noteID, key, value string) (*KmodEntry, error) {
+	trimmedVal := strings.TrimSpace(value)
+	mod := strings.TrimSpace(key)
+	if strings.HasPrefix(mod, "kmod:") {
+		mod = strings.TrimPrefix(mod, "kmod:")
+	}
+	prefix := kmodEntryPrefix(noteID, mod, trimmedVal)
+	if mod == "" {
+		return nil, system.ErrorLog("%s: empty module name", prefix)
+	}
+	if strings.ContainsAny(mod, " \t\r\n") {
+		return nil, system.ErrorLog("%s: module name '%s' contains whitespace", prefix, mod)
 	}
 
-	fields := strings.Fields(strings.TrimSpace(value))
+	fields := strings.Fields(trimmedVal)
 	if len(fields) == 0 {
-		return nil, system.ErrorLog("kmod: missing action for module '%s'", mod)
+		return nil, system.ErrorLog("%s: missing action for module '%s'", prefix, mod)
 	}
 
-	action, opts, err := parseKmodActionAndOptions(fields[0])
+	action, opts, err := parseKmodActionAndOptions(prefix, fields[0])
 	if err != nil {
 		return nil, err
 	}
@@ -133,15 +170,15 @@ func ParseKmodEntry(key, value string) (*KmodEntry, error) {
 		Params: make(map[string]string),
 	}
 
-	if err := validateKmodActionAndOpts(entry, action, opts); err != nil {
+	if err := validateKmodActionAndOpts(prefix, entry, action, opts); err != nil {
 		return nil, err
 	}
 
 	if len(fields) > 1 {
 		if action != "load" {
-			return nil, system.ErrorLog("kmod: parameters specified for non-load action '%s'", action)
+			return nil, system.ErrorLog("%s: parameters specified for non-load action '%s'", prefix, action)
 		}
-		params, err := parseKmodParams(fields[1:])
+		params, err := parseKmodParams(prefix, fields[1:])
 		if err != nil {
 			return nil, err
 		}
@@ -152,9 +189,9 @@ func ParseKmodEntry(key, value string) (*KmodEntry, error) {
 	case "blacklist", "block":
 		return entry, nil
 	case "load", "unload":
-		return nil, system.ErrorLog("kmod: action '%s' for module '%s' is not supported yet", action, mod)
+		return nil, system.ErrorLog("%s: action '%s' for module '%s' is not supported yet", prefix, action, mod)
 	default:
-		return nil, system.ErrorLog("kmod: unknown action '%s' for module '%s'", action, mod)
+		return nil, system.ErrorLog("%s: unknown action '%s' for module '%s'", prefix, action, mod)
 	}
 }
 
@@ -201,21 +238,23 @@ func GetKmodVal(key, cfgval string) string {
 }
 
 // OptKmodVal returns the expected [kmod] state string from the configured value.
-func OptKmodVal(key, cfgval, actual string) string {
-	if actual == "PNA" {
-		return "PNA"
-	}
-	entry, err := ParseKmodEntry(key, cfgval)
+func OptKmodVal(noteID, key, cfgval, actual string) string {
+	entry, err := ParseKmodEntry(noteID, key, cfgval)
 	if err != nil {
 		return "NA"
 	}
+	if actual == "PNA" {
+		return "PNA"
+	}
 
 	_, actualMod := parseStateString(actual)
+	action := entry.Action
+	if entry.Permanent {
+		action += "+permanent"
+	}
 	switch entry.Action {
-	case "blacklist":
-		return "blacklist|" + actualMod
-	case "block":
-		return "block|" + actualMod
+	case "blacklist", "block":
+		return action + "|" + actualMod
 	default:
 		return "NA"
 	}
@@ -224,13 +263,86 @@ func OptKmodVal(key, cfgval, actual string) string {
 // getTargetDropInLine returns the target file action and exact line for the target state.
 func getTargetDropInLine(targetState, mod string) (string, string) {
 	targetFile, _ := parseStateString(targetState)
-	switch targetFile {
+	action := strings.TrimSuffix(targetFile, "+permanent")
+	switch action {
 	case "block":
 		return "block", "install " + mod + " /bin/false"
 	case "blacklist":
 		return "blacklist", "blacklist " + mod
 	default:
 		return "none", ""
+	}
+}
+
+var (
+	appliedKmodNoteID string
+)
+
+// ResetKmodDropInFirstWriteFlags resets the flags used to track the first drop-in write of an apply.
+func ResetKmodDropInFirstWriteFlags() {
+	appliedKmodNoteID = ""
+}
+
+// hasOtherAppliedKmodParams returns true if any note other than currentNoteID is currently managing a kmod parameter.
+func hasOtherAppliedKmodParams(currentNoteID string, checkPermanent bool) bool {
+	params := GetAllSavedParameters()
+	for p, pnotes := range params {
+		if strings.HasPrefix(p, "kmod:") {
+			for _, entry := range pnotes.AllNotes {
+				if entry.NoteID != "start" && entry.NoteID != "" && entry.NoteID != currentNoteID {
+					isPerm := strings.Contains(entry.Value, "+permanent")
+					if checkPermanent && isPerm {
+						return true
+					}
+					if !checkPermanent && !isPerm {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
+// HasActiveKmodConfig inspects Saptune's saved parameter state to determine
+// if any transient or permanent kmod entries are currently active across all applied notes.
+func HasActiveKmodConfig() (hasTransient bool, hasPermanent bool) {
+	params := GetAllSavedParameters()
+	for p, pnotes := range params {
+		if strings.HasPrefix(p, "kmod:") {
+			if len(pnotes.AllNotes) > 0 {
+				lastEntry := pnotes.AllNotes[len(pnotes.AllNotes)-1]
+				if lastEntry.NoteID != "start" && lastEntry.NoteID != "" {
+					val := lastEntry.Value
+					if strings.Contains(val, "+permanent") {
+						hasPermanent = true
+					} else if val != "" && val != "none|unloaded" {
+						hasTransient = true
+					}
+				}
+			}
+		}
+	}
+	return hasTransient, hasPermanent
+}
+
+// CleanStaleKmodDropIns removes drop-in files from disk if no corresponding
+// active kmod configuration exists across all applied notes.
+func CleanStaleKmodDropIns() {
+	hasTransient, hasPermanent := HasActiveKmodConfig()
+
+	if !hasTransient {
+		if st, err := os.Stat(KmodDropInTransientPath); err == nil && !st.IsDir() {
+			system.WarningLog("kmod: removing stale drop-in '%s'", KmodDropInTransientPath)
+			_ = os.Remove(KmodDropInTransientPath)
+		}
+	}
+
+	if !hasPermanent {
+		if st, err := os.Stat(KmodDropInPermanentPath); err == nil && !st.IsDir() {
+			system.WarningLog("kmod: removing stale drop-in '%s'", KmodDropInPermanentPath)
+			_ = os.Remove(KmodDropInPermanentPath)
+		}
 	}
 }
 
@@ -277,47 +389,139 @@ func updateKmodDropIns(mod, targetLine string, isPermanent bool) error {
 }
 
 // SetKmodVal applies or reverts the kernel module drop-in configuration.
-func SetKmodVal(key, targetState, cfgval string, revert bool) error {
+func SetKmodVal(noteID, key, targetState, cfgval string, revert bool) error {
+	if targetState == "NA" {
+		return nil
+	}
 	mod, err := cleanKmodModule(key)
 	if err != nil {
-		return err
+		return nil
 	}
 	if targetState == "PNA" || system.IsModuleBuiltin(mod) {
 		system.WarningLog("kmod: module '%s' is compiled-in and cannot be handled. Skipping...", mod)
 		return nil
 	}
 
-	entry, _ := ParseKmodEntry(key, cfgval)
-	if revert && entry != nil && entry.Permanent {
+	targetAction, targetLine := getTargetDropInLine(targetState, mod)
+
+	entry, _ := ParseKmodEntry(noteID, key, cfgval)
+	if revert && entry != nil && entry.Permanent && targetAction == "none" {
 		system.DebugLog("kmod: revert skipped for module '%s' due to permanent option", mod)
 		return nil
 	}
-
-	targetAction, targetLine := getTargetDropInLine(targetState, mod)
 
 	if !revert && (targetAction == "blacklist" || targetAction == "block") && system.IsModuleLoaded(mod) {
 		system.WarningLog("kmod: module '%s' is currently loaded. It must be unloaded first for %s to take effect.", mod, targetAction)
 	}
 
+	if !revert && appliedKmodNoteID != noteID {
+		appliedKmodNoteID = noteID
+		if !hasOtherAppliedKmodParams(noteID, false) {
+			if st, err := os.Stat(KmodDropInTransientPath); err == nil && !st.IsDir() {
+				system.WarningLog("kmod: removing existing drop-in '%s' before applying configuration", KmodDropInTransientPath)
+				_ = os.Remove(KmodDropInTransientPath)
+			}
+		}
+		if !hasOtherAppliedKmodParams(noteID, true) {
+			if st, err := os.Stat(KmodDropInPermanentPath); err == nil && !st.IsDir() {
+				system.WarningLog("kmod: removing existing drop-in '%s' before applying configuration", KmodDropInPermanentPath)
+				_ = os.Remove(KmodDropInPermanentPath)
+			}
+		}
+	}
+
+	if !revert {
+		system.CheckModuleDropInShadowing(mod)
+	}
+
 	isPermanent := !revert && entry != nil && entry.Permanent
-	return updateKmodDropIns(mod, targetLine, isPermanent)
+	if err := updateKmodDropIns(mod, targetLine, isPermanent); err != nil {
+		return err
+	}
+
+	if !revert && targetAction == "block" {
+		if cfg, err := system.ModprobeConfig(); err == nil {
+			effective, multiple, winning := system.CheckEffectiveInstallStatus(cfg, mod)
+			if !effective && winning != "" {
+				system.ErrorLog("kmod: module '%s': another install entry '%s' takes precedence over saptune's block rule", mod, winning)
+			} else if multiple {
+				system.WarningLog("kmod: module '%s': multiple install entries found, saptune's block rule takes precedence", mod)
+			}
+		}
+	}
+	if !revert && targetAction == "blacklist" {
+		if cfg, err := system.ModprobeConfig(); err == nil {
+			installEntries := system.GetModuleInstallEntries(cfg, mod)
+			if len(installEntries) > 0 {
+				system.ErrorLog("kmod: module '%s': another install entry '%s' takes precedence over saptune's blacklist rule", mod, installEntries[0])
+			}
+		}
+	}
+	return nil
 }
 
 // GetKmodInform checks for effective configuration precedence, already loaded on apply,
-// and permanent flags, returning information tokens separated by § for footnote preparation.
-func GetKmodInform(key, cfgval, targetState string) string {
+// permanent flags, invalid entry flags, and compiled-in (builtin) flags, returning information tokens separated by § for footnote preparation.
+func GetKmodInform(noteID, key, cfgval, targetState string) string {
+	if targetState == "NA" {
+		return "invalid"
+	}
 	mod, err := cleanKmodModule(key)
 	if err != nil {
-		return ""
+		return "invalid"
 	}
-	var flags []string
+	if targetState == "PNA" || system.IsModuleBuiltin(mod) {
+		return "builtin"
+	}
+	entry, err := ParseKmodEntry(noteID, key, cfgval)
+	if err != nil {
+		return "invalid"
+	}
 
-	// Footnote 18: check effective configuration
-	_, targetLine := getTargetDropInLine(targetState, mod)
-	if targetLine != "" {
-		if cfg, err := system.ModprobeConfig(); err == nil {
-			if !system.IsEffectiveConfigEntry(cfg, targetLine) {
-				flags = append(flags, "masked")
+	actualDropInState := system.GetDropInModuleState(KmodDropInTransientPath, KmodDropInPermanentPath, mod)
+
+	var flags []string
+	addFlag := func(f string) {
+		for _, existing := range flags {
+			if existing == f {
+				return
+			}
+		}
+		flags = append(flags, f)
+	}
+
+	lastNote := ParameterLastNote(key)
+	if lastNote == "" {
+		lastNote = ParameterLastNote(mod)
+	}
+	isSuperseded := lastNote != "" && lastNote != "start" && lastNote != noteID
+
+	if actualDropInState != "none" && !isSuperseded {
+		// Check drop-in file shadowing for this specific module
+		shadowedByHigher, shadowsLower := system.CheckModuleDropInShadowing(mod)
+		if shadowedByHigher && !entry.Permanent {
+			addFlag("masked")
+		}
+		if shadowsLower {
+			addFlag("shadowing_warning")
+		}
+
+		// Footnotes 18 & 23: check effective configuration and install conflict
+		targetAction, targetLine := getTargetDropInLine(targetState, mod)
+		if targetLine != "" {
+			if cfg, err := system.ModprobeConfig(); err == nil {
+				if targetAction == "block" {
+					effective, multiple, _ := system.CheckEffectiveInstallStatus(cfg, mod)
+					if !effective {
+						addFlag("masked")
+					} else if multiple {
+						addFlag("multiple_install")
+					}
+				} else {
+					if !system.IsEffectiveConfigEntry(cfg, targetLine) || len(system.GetModuleInstallEntries(cfg, mod)) > 0 {
+						addFlag("masked")
+					}
+				}
 			}
 		}
 	}
@@ -328,13 +532,13 @@ func GetKmodInform(key, cfgval, targetState string) string {
 		startState := pnotes.AllNotes[0].Value
 		_, startMod := parseStateString(startState)
 		if strings.HasPrefix(startMod, "loaded:") && system.IsModuleLoaded(mod) {
-			flags = append(flags, "loaded_on_apply")
+			addFlag("loaded_on_apply")
 		}
 	}
 
 	// Footnote 20: check if permanent is set
-	if entry, _ := ParseKmodEntry(key, cfgval); entry != nil && entry.Permanent {
-		flags = append(flags, "permanent")
+	if entry.Permanent {
+		addFlag("permanent")
 	}
 
 	return strings.Join(flags, "§")

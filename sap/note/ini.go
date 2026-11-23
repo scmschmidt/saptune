@@ -124,6 +124,7 @@ func (vend INISettings) Initialise() (Note, error) {
 		case INISectionService:
 			vend.SysctlParams[param.Key] = GetServiceVal(param.Key, param.Value)
 		case INISectionKmod:
+			vend.Inform[param.Key] = ""
 			vend.SysctlParams[param.Key] = GetKmodVal(param.Key, param.Value)
 		case INISectionLogin:
 			vend.SysctlParams[param.Key], _ = GetLoginVal(param.Key)
@@ -216,8 +217,8 @@ func (vend INISettings) Optimise() (Note, error) {
 		case INISectionService:
 			vend.SysctlParams[param.Key] = OptServiceVal(param.Key, param.Value)
 		case INISectionKmod:
-			vend.SysctlParams[param.Key] = OptKmodVal(param.Key, param.Value, vend.SysctlParams[param.Key])
-			vend.Inform[param.Key] = GetKmodInform(param.Key, param.Value, vend.SysctlParams[param.Key])
+			vend.SysctlParams[param.Key] = OptKmodVal(vend.ID, param.Key, param.Value, vend.SysctlParams[param.Key])
+			vend.Inform[param.Key] = GetKmodInform(vend.ID, param.Key, param.Value, vend.SysctlParams[param.Key])
 		case INISectionLogin:
 			vend.SysctlParams[param.Key] = OptLoginVal(param.Value)
 		case INISectionMEM:
@@ -353,7 +354,7 @@ func (vend INISettings) Apply() error {
 		case INISectionService:
 			errs = append(errs, SetServiceVal(param.Key, vend.SysctlParams[param.Key]))
 		case INISectionKmod:
-			errs = append(errs, SetKmodVal(param.Key, vend.SysctlParams[param.Key], param.Value, revertValues))
+			errs = append(errs, SetKmodVal(vend.ID, param.Key, vend.SysctlParams[param.Key], param.Value, revertValues))
 		case INISectionLogin:
 			errs = append(errs, SetLoginVal(param.Key, vend.SysctlParams[param.Key], revertValues))
 		case INISectionMEM:
@@ -376,6 +377,9 @@ func (vend INISettings) Apply() error {
 		}
 	}
 	err = sap.PrintErrors(errs)
+	if !revertValues {
+		CleanStaleKmodDropIns()
+	}
 	return err
 }
 

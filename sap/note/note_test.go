@@ -414,3 +414,156 @@ func TestCompareJSValu(t *testing.T) {
 		t.Fatalf("compare '%+v' and '%+v', return '%s' and '%s', match: '%+v'\n", v1i, v2i, r1, r2, match)
 	}
 }
+
+func TestCompareKmodFields(t *testing.T) {
+	cases := []struct {
+		name        string
+		key         string
+		actVal      string
+		expVal      string
+		expectedJS  string
+		actualJS    string
+		expectMatch bool
+	}{
+		{
+			name:        "blacklist compliant",
+			key:         "kmod:xen",
+			actVal:      "blacklist|unloaded",
+			expVal:      "blacklist|unloaded",
+			expectedJS:  "blacklist",
+			actualJS:    "blacklist|unloaded",
+			expectMatch: true,
+		},
+		{
+			name:        "blacklist non-compliant",
+			key:         "kmod:xen",
+			actVal:      "none|unloaded",
+			expVal:      "blacklist|unloaded",
+			expectedJS:  "blacklist",
+			actualJS:    "none|unloaded",
+			expectMatch: false,
+		},
+		{
+			name:        "block compliant",
+			key:         "kmod:vfat",
+			actVal:      "block|unloaded",
+			expVal:      "block|unloaded",
+			expectedJS:  "block",
+			actualJS:    "block|unloaded",
+			expectMatch: true,
+		},
+		{
+			name:        "block non-compliant",
+			key:         "kmod:vfat",
+			actVal:      "none|unloaded",
+			expVal:      "block|unloaded",
+			expectedJS:  "block",
+			actualJS:    "none|unloaded",
+			expectMatch: false,
+		},
+		{
+			name:        "blacklist permanent compliant",
+			key:         "kmod:floppy",
+			actVal:      "blacklist+permanent|unloaded",
+			expVal:      "blacklist+permanent|unloaded",
+			expectedJS:  "blacklist+permanent",
+			actualJS:    "blacklist+permanent|unloaded",
+			expectMatch: true,
+		},
+		{
+			name:        "blacklist permanent expected but transient actual",
+			key:         "kmod:floppy",
+			actVal:      "blacklist|unloaded",
+			expVal:      "blacklist+permanent|unloaded",
+			expectedJS:  "blacklist+permanent",
+			actualJS:    "blacklist|unloaded",
+			expectMatch: false,
+		},
+		{
+			name:        "block permanent compliant",
+			key:         "kmod:vfat",
+			actVal:      "block+permanent|unloaded",
+			expVal:      "block+permanent|unloaded",
+			expectedJS:  "block+permanent",
+			actualJS:    "block+permanent|unloaded",
+			expectMatch: true,
+		},
+		{
+			name:        "syntax error Expected NA has empty Actual and no match",
+			key:         "kmod:cifs",
+			actVal:      "none|unloaded",
+			expVal:      "NA",
+			expectedJS:  "NA",
+			actualJS:    "",
+			expectMatch: false,
+		},
+		{
+			name:        "syntax error on builtin module Expected NA has empty Actual and no match",
+			key:         "kmod:xen",
+			actVal:      "PNA",
+			expVal:      "NA",
+			expectedJS:  "NA",
+			actualJS:    "",
+			expectMatch: false,
+		},
+		{
+			name:        "builtin module Expected PNA has no match",
+			key:         "kmod:printk",
+			actVal:      "PNA",
+			expVal:      "PNA",
+			expectedJS:  "PNA",
+			actualJS:    "PNA",
+			expectMatch: false,
+		},
+	}
+
+	for _, c := range cases {
+		actNote := INISettings{
+			SysctlParams: map[string]string{c.key: c.actVal},
+		}
+		expNote := INISettings{
+			SysctlParams: map[string]string{c.key: c.expVal},
+		}
+
+		allMatch, comparisons, _ := CompareNoteFields(actNote, expNote, "testNote", "forApply")
+		comp, ok := comparisons["SysctlParams["+c.key+"]"]
+		if !ok {
+			t.Fatalf("[%s] missing comparison for %s", c.name, c.key)
+		}
+		if comp.ExpectedValueJS != c.expectedJS {
+			t.Errorf("[%s] ExpectedValueJS: got '%s', want '%s'", c.name, comp.ExpectedValueJS, c.expectedJS)
+		}
+		if comp.ActualValueJS != c.actualJS {
+			t.Errorf("[%s] ActualValueJS: got '%s', want '%s'", c.name, comp.ActualValueJS, c.actualJS)
+		}
+		if comp.MatchExpectation != c.expectMatch {
+			t.Errorf("[%s] MatchExpectation: got %v, want %v", c.name, comp.MatchExpectation, c.expectMatch)
+		}
+		if allMatch != c.expectMatch {
+			t.Errorf("[%s] allMatch: got %v, want %v", c.name, allMatch, c.expectMatch)
+		}
+	}
+}
+
+func TestCompareKmodMaskedEntryNonCompliant(t *testing.T) {
+	actNote := INISettings{
+		SysctlParams: map[string]string{"kmod:cifs": "block|unloaded"},
+		Inform:       map[string]string{"kmod:cifs": ""},
+	}
+	expNote := INISettings{
+		SysctlParams: map[string]string{"kmod:cifs": "block|unloaded"},
+		Inform:       map[string]string{"kmod:cifs": "masked"},
+	}
+
+	allMatch, comparisons, _ := CompareNoteFields(actNote, expNote, "test_1", "forVerify")
+	if allMatch {
+		t.Errorf("expected allMatch = false when kmod entry has Inform 'masked'")
+	}
+	comp, ok := comparisons["SysctlParams[kmod:cifs]"]
+	if !ok {
+		t.Fatalf("missing comparison for SysctlParams[kmod:cifs]")
+	}
+	if comp.MatchExpectation {
+		t.Errorf("expected MatchExpectation = false for masked kmod entry")
+	}
+}
