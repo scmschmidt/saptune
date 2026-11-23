@@ -142,16 +142,10 @@ func parseKmodParams(prefix string, tokens []string) (map[string]string, error) 
 // Load and unload actions are rejected for now until implemented.
 func ParseKmodEntry(noteID, key, value string) (*KmodEntry, error) {
 	trimmedVal := strings.TrimSpace(value)
-	mod := strings.TrimSpace(key)
-	if strings.HasPrefix(mod, "kmod:") {
-		mod = strings.TrimPrefix(mod, "kmod:")
-	}
+	mod, err := cleanKmodModule(key)
 	prefix := kmodEntryPrefix(noteID, mod, trimmedVal)
-	if mod == "" {
-		return nil, system.ErrorLog("%s: empty module name", prefix)
-	}
-	if strings.ContainsAny(mod, " \t\r\n") {
-		return nil, system.ErrorLog("%s: module name '%s' contains whitespace", prefix, mod)
+	if err != nil {
+		return nil, system.ErrorLog("%s: %v", prefix, err)
 	}
 
 	fields := strings.Fields(trimmedVal)
@@ -492,6 +486,9 @@ func GetKmodInform(noteID, key, cfgval, targetState string) string {
 
 	lastNote := ParameterLastNote(key)
 	if lastNote == "" {
+		lastNote = ParameterLastNote("kmod:" + mod)
+	}
+	if lastNote == "" {
 		lastNote = ParameterLastNote(mod)
 	}
 	isSuperseded := lastNote != "" && lastNote != "start" && lastNote != noteID
@@ -528,6 +525,9 @@ func GetKmodInform(noteID, key, cfgval, targetState string) string {
 
 	// Footnote 19: check if recorded as loaded on apply and still loaded
 	pnotes := GetSavedParameterNotes(key)
+	if len(pnotes.AllNotes) == 0 {
+		pnotes = GetSavedParameterNotes("kmod:" + mod)
+	}
 	if len(pnotes.AllNotes) > 0 && pnotes.AllNotes[0].NoteID == "start" {
 		startState := pnotes.AllNotes[0].Value
 		_, startMod := parseStateString(startState)

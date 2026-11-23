@@ -98,10 +98,7 @@ func PrintNoteFields(writer io.Writer, header string, noteComparisons map[string
 					parts := strings.SplitN(pExp, "|", 2)
 					pExp = parts[0]
 				}
-				if strings.Contains(pAct, "|loaded:") {
-					parts := strings.SplitN(pAct, "|loaded:", 2)
-					pAct = parts[0] + "|loaded"
-				}
+				pAct = trimKmodActual(pAct)
 			}
 		}
 		noteLine.ActValue = &pAct
@@ -408,9 +405,8 @@ func setWidthOfColums(compare note.FieldComparison, c1, c2, c3, c4 int) (int, in
 		if strings.HasPrefix(compare.ReflectMapKey, "kmod:") {
 			if compare.ExpectedValueJS == "NA" {
 				actVal = ""
-			} else if strings.Contains(actVal, "|loaded:") {
-				parts := strings.SplitN(actVal, "|loaded:", 2)
-				actVal = parts[0] + "|loaded"
+			} else {
+				actVal = trimKmodActual(actVal)
 			}
 		}
 		if len(actVal) > c4 {
@@ -419,6 +415,15 @@ func setWidthOfColums(compare note.FieldComparison, c1, c2, c3, c4 int) (int, in
 	}
 	c1, c3, c4 = chkMaxWidthOfColums([]int{c1, c3, c4})
 	return c1, c2, c3, c4
+}
+
+// trimKmodActual strips the runtime parameter dictionary payload from actual kmod values.
+func trimKmodActual(act string) string {
+	if strings.Contains(act, "|loaded:") {
+		parts := strings.SplitN(act, "|loaded:", 2)
+		return parts[0] + "|loaded"
+	}
+	return act
 }
 
 // chkMaxWidthOfColums limits the width of the columns for verify and simulate

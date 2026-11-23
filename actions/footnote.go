@@ -89,10 +89,14 @@ func prepareFootnote(comparison note.FieldComparison, compliant, comment, inform
 	if system.GetCSP() == "aws" {
 		footnote1 = footnote1AWS
 	}
-	// set footnote for unsupported or not available parameter [1],[2],[16]
-	if !strings.HasPrefix(comparison.ReflectMapKey, "kmod:") {
-		compliant, comment, footnote = setUsNa(comparison.ActualValue.(string), compliant, comment, footnote)
+	// set footnotes for kmod section entries [18]-[24]
+	if strings.HasPrefix(comparison.ReflectMapKey, "kmod:") {
+		compliant, comment, footnote = setKmodFootnotes(comparison, compliant, comment, inform, footnote)
+		return compliant, comment, footnote
 	}
+
+	// set footnote for unsupported or not available parameter [1],[2],[16]
+	compliant, comment, footnote = setUsNa(comparison.ActualValue.(string), compliant, comment, footnote)
 	// set footnote for rpm or grub parameter [3],[6]
 	compliant, comment, footnote = setRpmGrub(comparison, compliant, comment, footnote)
 	// set footnote for diffs in force_latency parameter [4]
@@ -117,8 +121,6 @@ func prepareFootnote(comparison note.FieldComparison, compliant, comment, inform
 	compliant, comment, footnote = setNofile(comparison.ReflectMapKey, compliant, comment, inform, footnote)
 	// set footnote for VSZ_TMPFS_PERCENT parameter from mem section
 	compliant, comment, footnote = setMem(comparison.ReflectMapKey, compliant, comment, footnote)
-	// set footnotes for kmod section entries [18],[19],[20]
-	compliant, comment, footnote = setKmodFootnotes(comparison, compliant, comment, inform, footnote)
 	return compliant, comment, footnote
 }
 
@@ -397,13 +399,13 @@ func chkForConflicts(comparison note.FieldComparison, compliant, comment, noteID
 		return compliant, comment, footnote
 	}
 
-	compliant = compliant + " [17]"
+	compliant = appendFootnoteTag(compliant, "[17]")
 	if strings.Contains(compliant, "yes") {
 		compliant = strings.Replace(compliant, "yes ", " -  ", 1)
 	} else if strings.Contains(compliant, "no") {
 		compliant = strings.Replace(compliant, "no ", " - ", 1)
 	}
-	comment = comment + " [17]"
+	comment = appendFootnoteTag(comment, "[17]")
 
 	footnote[16] = writeFN(footnote[16], footnote17, lastNote, "LASTNOTEID")
 	footnote[16] = writeFN("", footnote[16], noteID, "CURNOTE")

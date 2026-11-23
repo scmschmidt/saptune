@@ -368,11 +368,19 @@ func CheckModuleDropInShadowing(module string) (shadowedByHigher bool, shadowsLo
 			if module == "" || FileContainsModule(fPath, module) {
 				if !foundTransDir {
 					// Higher directory shadows saptune!
-					ErrorLog("kmod: module '%s': '%s' shadows saptune transient configuration in '%s'", module, fPath, transDir)
+					if module != "" {
+						ErrorLog("kmod: module '%s': '%s' shadows saptune transient configuration in '%s'", module, fPath, transDir)
+					} else {
+						ErrorLog("kmod: '%s' shadows saptune transient configuration in '%s'", fPath, transDir)
+					}
 					shadowedByHigher = true
 				} else {
 					// Lower directory is shadowed by saptune
-					WarningLog("kmod: module '%s': '%s' is shadowed by saptune transient configuration in '%s'", module, fPath, transDir)
+					if module != "" {
+						WarningLog("kmod: module '%s': '%s' is shadowed by saptune transient configuration in '%s'", module, fPath, transDir)
+					} else {
+						WarningLog("kmod: '%s' is shadowed by saptune transient configuration in '%s'", fPath, transDir)
+					}
 					shadowsLower = true
 				}
 			}
@@ -390,10 +398,18 @@ func CheckModuleDropInShadowing(module string) (shadowedByHigher bool, shadowsLo
 		if st, err := os.Stat(fPath); err == nil && !st.IsDir() {
 			if module == "" || FileContainsModule(fPath, module) {
 				if !foundPermDir {
-					ErrorLog("kmod: module '%s': '%s' shadows saptune permanent configuration in '%s'", module, fPath, permDir)
+					if module != "" {
+						ErrorLog("kmod: module '%s': '%s' shadows saptune permanent configuration in '%s'", module, fPath, permDir)
+					} else {
+						ErrorLog("kmod: '%s' shadows saptune permanent configuration in '%s'", fPath, permDir)
+					}
 					shadowedByHigher = true
 				} else {
-					WarningLog("kmod: module '%s': '%s' is shadowed by saptune permanent configuration in '%s'", module, fPath, permDir)
+					if module != "" {
+						WarningLog("kmod: module '%s': '%s' is shadowed by saptune permanent configuration in '%s'", module, fPath, permDir)
+					} else {
+						WarningLog("kmod: '%s' is shadowed by saptune permanent configuration in '%s'", fPath, permDir)
+					}
 					shadowsLower = true
 				}
 			}
